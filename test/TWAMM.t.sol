@@ -43,7 +43,7 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         uint256 earningsFactorLast
     );
 
-    // 
+    //
     TWAMM twamm =
         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
     address hookAddress;
@@ -99,7 +99,7 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         assertEq(twamm.lastVirtualOrderTimestamp(initId), 10000);
     }
 
-    // @note need to figure out what snapStart is. 
+    // @note need to figure out what snapStart is.
     // When it is comment out it is panicing for an arithmetic underflow or overflow.
     // function testTWAMM_submitOrder_StoresOrderWithCorrectPoolAndOrderPoolInfo() public {
     //     uint160 expiration = 30000;
