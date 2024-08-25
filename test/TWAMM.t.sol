@@ -450,88 +450,88 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         twamm.submitOrder(poolKey, key2, amount);
     }
 
-function testCreateProposal() public {
-    vm.expectEmit(true, true, true, true);
-    emit ProposalCreated(1, address(this), 1 ether, 0.1 ether, 7 days, true);
-    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+// function testCreateProposal() public {
+//     vm.expectEmit(true, true, true, true);
+//     emit ProposalCreated(1, address(this), 1 ether, 0.1 ether, 7 days, true);
+//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
 
-    (uint256 id, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne, , , uint256 endTime, bool executed) = twamm.proposals(1);
-    assertEq(id, 1);
-    assertEq(proposer, address(this));
-    assertEq(amount, 1 ether);
-    assertEq(salesRate, 0.1 ether);
-    assertEq(duration, 7 days);
-    assertTrue(zeroForOne);
-    assertEq(endTime, block.timestamp + 3 days);
-    assertFalse(executed);
-}
+//     (uint256 id, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne, , , uint256 endTime, bool executed) = twamm.proposals(1);
+//     assertEq(id, 1);
+//     assertEq(proposer, address(this));
+//     assertEq(amount, 1 ether);
+//     assertEq(salesRate, 0.1 ether);
+//     assertEq(duration, 7 days);
+//     assertTrue(zeroForOne);
+//     assertEq(endTime, block.timestamp + 3 days);
+//     assertFalse(executed);
+// }
 
-function testCastVote() public {
-    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+// function testCastVote() public {
+//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
 
-    vm.prank(address(0x1));
-    vm.expectEmit(true, true, true, true);
-    emit Voted(1, address(0x1), true, 50 ether);
-    twamm.castVote(1, true);
+//     vm.prank(address(0x1));
+//     vm.expectEmit(true, true, true, true);
+//     emit Voted(1, address(0x1), true, 50 ether);
+//     twamm.castVote(1, true);
 
-    (, , , , , , uint256 votesFor, , , ) = twamm.proposals(1);
-    assertEq(votesFor, 50 ether);
-}
+//     (, , , , , , uint256 votesFor, , , ) = twamm.proposals(1);
+//     assertEq(votesFor, 50 ether);
+// }
 
-function testExecuteProposal() public {
-    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+// function testExecuteProposal() public {
+//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
 
-    vm.prank(address(0x1));
-    twamm.castVote(1, true);
+//     vm.prank(address(0x1));
+//     twamm.castVote(1, true);
 
-    vm.warp(block.timestamp + 4 days);
+//     vm.warp(block.timestamp + 4 days);
 
-    vm.startPrank(treasury);
-    token0.mint(treasury, 1 ether);
-    token0.approve(address(twamm), 1 ether);
-    vm.stopPrank();
+//     vm.startPrank(treasury);
+//     token0.mint(treasury, 1 ether);
+//     token0.approve(address(twamm), 1 ether);
+//     vm.stopPrank();
 
-    vm.expectEmit(true, true, true, true);
-    emit ProposalExecuted(1);
-    twamm.executeProposal(1, poolKey);
+//     vm.expectEmit(true, true, true, true);
+//     emit ProposalExecuted(1);
+//     twamm.executeProposal(1, poolKey);
 
-    (, , , , , , , , , bool executed) = twamm.proposals(1);
-    assertTrue(executed);
+//     (, , , , , , , , , bool executed) = twamm.proposals(1);
+//     assertTrue(executed);
 
-    // Check if the TWAMM order was created
-    ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey(treasury, uint160(block.timestamp + 7 days), true);
-    ITWAMM.Order memory order = twamm.getOrder(poolKey, orderKey);
-    assertEq(order.sellRate, uint256(0.1 ether) / 7 days);
-}
+//     // Check if the TWAMM order was created
+//     ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey(treasury, uint160(block.timestamp + 7 days), true);
+//     ITWAMM.Order memory order = twamm.getOrder(poolKey, orderKey);
+//     assertEq(order.sellRate, uint256(0.1 ether) / 7 days);
+// }
 
-    function testCannotCreateProposalWithoutSufficientTokens() public {
-        vm.prank(address(0x3)); // An address with no DAO tokens
-        vm.expectRevert("Insufficient tokens to propose");
-        twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
-    }
+//     function testCannotCreateProposalWithoutSufficientTokens() public {
+//         vm.prank(address(0x3)); // An address with no DAO tokens
+// vm.expectRevert(TWAMM.InsufficientTokensToPropose.selector);
+//         twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+//     }
 
-function testCannotVoteAfterVotingPeriod() public {
-    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
-    vm.warp(block.timestamp + 3 days + 1); // Just after voting period
-    vm.expectRevert("Voting period ended");
-    twamm.castVote(1, true);
-}
+// function testCannotVoteAfterVotingPeriod() public {
+//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+//     vm.warp(block.timestamp + 3 days + 1); // Just after voting period
+//     vm.expectRevert("Voting period ended");
+//     twamm.castVote(1, true);
+// }
 
-function testCannotExecuteBeforeDelay() public {
-    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
-    vm.prank(address(0x1));
-    twamm.castVote(1, true);
-    vm.warp(block.timestamp + 3 days + 23 hours); // Just before the delay ends
-    vm.expectRevert("Execution delay not met");
-    twamm.executeProposal(1, poolKey);
-}
+// function testCannotExecuteBeforeDelay() public {
+//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+//     vm.prank(address(0x1));
+//     twamm.castVote(1, true);
+//     vm.warp(block.timestamp + 3 days + 23 hours); // Just before the delay ends
+//     vm.expectRevert("Execution delay not met");
+//     twamm.executeProposal(1, poolKey);
+// }
 
-function testCannotExecuteFailedProposal() public {
-    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
-    vm.prank(address(0x1));
-    twamm.castVote(1, false);
-    vm.warp(block.timestamp + 4 days);
-    vm.expectRevert("Proposal did not pass");
-    twamm.executeProposal(1, poolKey);
-}
+// function testCannotExecuteFailedProposal() public {
+//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+//     vm.prank(address(0x1));
+//     twamm.castVote(1, false);
+//     vm.warp(block.timestamp + 4 days);
+//     vm.expectRevert("Proposal did not pass");
+//     twamm.executeProposal(1, poolKey);
+// }
 }

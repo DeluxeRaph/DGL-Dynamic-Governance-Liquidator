@@ -42,7 +42,7 @@ contract TWAMM is BaseHook, ITWAMM {
     bool internal constant ZERO_FOR_ONE = true;
     bool internal constant ONE_FOR_ZERO = false;
 
-           // Governance-related state variables
+    // Governance-related state variables
     IERC20Minimal public daoToken;
     address public treasury;
     uint256 public constant VOTING_PERIOD = 3 days;
@@ -68,6 +68,8 @@ contract TWAMM is BaseHook, ITWAMM {
     event ProposalCreated(uint256 indexed proposalId, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne);
     event Voted(uint256 indexed proposalId, address voter, bool support, uint256 votes);
     event ProposalExecuted(uint256 indexed proposalId);
+
+    error InsufficientTokensToPropose();
 
 
     /// @notice Contains full state related to the TWAMM
@@ -170,10 +172,11 @@ contract TWAMM is BaseHook, ITWAMM {
         self.lastVirtualOrderTimestamp = block.timestamp;
     }
 
-    // @notice New Create a Proposale to update Order
+    // @notice New Create a Proposal to update Order
     function createProposal(uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne) external {
-        require(daoToken.balanceOf(msg.sender) >= MIN_PROPOSAL_THRESHOLD, "Insufficient tokens to propose");
-
+    if (daoToken.balanceOf(msg.sender) < MIN_PROPOSAL_THRESHOLD) {
+        revert InsufficientTokensToPropose();
+    }
         proposalCount++;
         proposals[proposalCount] = Proposal({
             id: proposalCount,
