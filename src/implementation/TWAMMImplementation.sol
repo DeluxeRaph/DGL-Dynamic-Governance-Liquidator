@@ -7,7 +7,13 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 contract TWAMMImplementation is TWAMM {
-    constructor(IPoolManager poolManager, uint256 interval, TWAMM addressToEtch) TWAMM(poolManager, interval) {
+    constructor(
+        IPoolManager poolManager,
+        uint256 interval,
+        TWAMM addressToEtch,
+        address daoToken,
+        address treasury
+    ) TWAMM(poolManager, interval, daoToken, treasury) {
         Hooks.validateHookPermissions(addressToEtch, getHookPermissions());
     }
 

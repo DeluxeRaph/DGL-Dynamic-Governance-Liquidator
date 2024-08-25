@@ -43,12 +43,18 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         uint256 earningsFactorLast
     );
 
+    event ProposalCreated(uint256 indexed proposalId, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne);
+    event Voted(uint256 indexed proposalId, address voter, bool support, uint256 votes);
+    event ProposalExecuted(uint256 indexed proposalId);
+
     //
     TWAMM twamm =
         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
     address hookAddress;
     MockERC20 token0;
     MockERC20 token1;
+    MockERC20 daoToken;
+    address treasury;
     PoolKey poolKey;
     PoolId poolId;
 
@@ -58,11 +64,12 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
 
         token0 = MockERC20(Currency.unwrap(currency0));
         token1 = MockERC20(Currency.unwrap(currency1));
+        daoToken = new MockERC20("DAO Token", "DAO", 18);
+        treasury = address(0x1234);
 
-        TWAMMImplementation impl = new TWAMMImplementation(manager, 10_000, twamm);
+        TWAMMImplementation impl = new TWAMMImplementation(manager, 10_000, twamm, address(daoToken), treasury);
         (, bytes32[] memory writes) = vm.accesses(address(impl));
         vm.etch(address(twamm), address(impl).code);
-        // for each storage key that was written during the hook implementation, copy the value over
         unchecked {
             for (uint256 i = 0; i < writes.length; i++) {
                 bytes32 slot = writes[i];
@@ -87,6 +94,18 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
             IPoolManager.ModifyLiquidityParams(TickMath.minUsableTick(60), TickMath.maxUsableTick(60), 10 ether, 0),
             ZERO_BYTES
         );
+
+        // Mint some DAO tokens for testing
+        daoToken.mint(address(this), 100 ether);
+        daoToken.mint(address(0x1), 50 ether);
+        daoToken.mint(address(0x2), 25 ether);
+
+            // Approve TWAMM to spend tokens
+    daoToken.approve(address(twamm), type(uint256).max);
+    vm.prank(address(0x1));
+    daoToken.approve(address(twamm), type(uint256).max);
+    vm.prank(address(0x2));
+    daoToken.approve(address(twamm), type(uint256).max);
     }
 
     // This checking the last order that took place?
@@ -418,10 +437,7 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         return (key, key.toId());
     }
 
-    function submitOrdersBothDirections()
-        internal
-        returns (ITWAMM.OrderKey memory key1, ITWAMM.OrderKey memory key2, uint256 amount)
-    {
+    function submitOrdersBothDirections() internal returns (ITWAMM.OrderKey memory key1, ITWAMM.OrderKey memory key2, uint256 amount) {
         key1 = ITWAMM.OrderKey(address(this), 30000, true);
         key2 = ITWAMM.OrderKey(address(this), 30000, false);
         amount = 1 ether;
@@ -433,4 +449,89 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         twamm.submitOrder(poolKey, key1, amount);
         twamm.submitOrder(poolKey, key2, amount);
     }
+
+function testCreateProposal() public {
+    vm.expectEmit(true, true, true, true);
+    emit ProposalCreated(1, address(this), 1 ether, 0.1 ether, 7 days, true);
+    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+
+    (uint256 id, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne, , , uint256 endTime, bool executed) = twamm.proposals(1);
+    assertEq(id, 1);
+    assertEq(proposer, address(this));
+    assertEq(amount, 1 ether);
+    assertEq(salesRate, 0.1 ether);
+    assertEq(duration, 7 days);
+    assertTrue(zeroForOne);
+    assertEq(endTime, block.timestamp + 3 days);
+    assertFalse(executed);
+}
+
+function testCastVote() public {
+    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+
+    vm.prank(address(0x1));
+    vm.expectEmit(true, true, true, true);
+    emit Voted(1, address(0x1), true, 50 ether);
+    twamm.castVote(1, true);
+
+    (, , , , , , uint256 votesFor, , , ) = twamm.proposals(1);
+    assertEq(votesFor, 50 ether);
+}
+
+function testExecuteProposal() public {
+    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+
+    vm.prank(address(0x1));
+    twamm.castVote(1, true);
+
+    vm.warp(block.timestamp + 4 days);
+
+    vm.startPrank(treasury);
+    token0.mint(treasury, 1 ether);
+    token0.approve(address(twamm), 1 ether);
+    vm.stopPrank();
+
+    vm.expectEmit(true, true, true, true);
+    emit ProposalExecuted(1);
+    twamm.executeProposal(1, poolKey);
+
+    (, , , , , , , , , bool executed) = twamm.proposals(1);
+    assertTrue(executed);
+
+    // Check if the TWAMM order was created
+    ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey(treasury, uint160(block.timestamp + 7 days), true);
+    ITWAMM.Order memory order = twamm.getOrder(poolKey, orderKey);
+    assertEq(order.sellRate, uint256(0.1 ether) / 7 days);
+}
+
+    function testCannotCreateProposalWithoutSufficientTokens() public {
+        vm.prank(address(0x3)); // An address with no DAO tokens
+        vm.expectRevert("Insufficient tokens to propose");
+        twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+    }
+
+function testCannotVoteAfterVotingPeriod() public {
+    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+    vm.warp(block.timestamp + 3 days + 1); // Just after voting period
+    vm.expectRevert("Voting period ended");
+    twamm.castVote(1, true);
+}
+
+function testCannotExecuteBeforeDelay() public {
+    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+    vm.prank(address(0x1));
+    twamm.castVote(1, true);
+    vm.warp(block.timestamp + 3 days + 23 hours); // Just before the delay ends
+    vm.expectRevert("Execution delay not met");
+    twamm.executeProposal(1, poolKey);
+}
+
+function testCannotExecuteFailedProposal() public {
+    twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+    vm.prank(address(0x1));
+    twamm.castVote(1, false);
+    vm.warp(block.timestamp + 4 days);
+    vm.expectRevert("Proposal did not pass");
+    twamm.executeProposal(1, poolKey);
+}
 }

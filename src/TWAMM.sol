@@ -42,6 +42,34 @@ contract TWAMM is BaseHook, ITWAMM {
     bool internal constant ZERO_FOR_ONE = true;
     bool internal constant ONE_FOR_ZERO = false;
 
+           // Governance-related state variables
+    IERC20Minimal public daoToken;
+    address public treasury;
+    uint256 public constant VOTING_PERIOD = 3 days;
+    uint256 public constant EXECUTION_DELAY = 1 days;
+    uint256 public constant MIN_PROPOSAL_THRESHOLD = 1e18; // 1% of total supply to propose
+
+        struct Proposal {
+        uint256 id;
+        address proposer;
+        uint256 amount;
+        uint256 salesRate;
+        uint256 duration;
+        bool zeroForOne;
+        uint256 votesFor;
+        uint256 votesAgainst;
+        uint256 endTime;
+        bool executed;
+    }
+
+    mapping(uint256 => Proposal) public proposals;
+    uint256 public proposalCount;
+
+    event ProposalCreated(uint256 indexed proposalId, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne);
+    event Voted(uint256 indexed proposalId, address voter, bool support, uint256 votes);
+    event ProposalExecuted(uint256 indexed proposalId);
+
+
     /// @notice Contains full state related to the TWAMM
     /// @member lastVirtualOrderTimestamp Last timestamp in which virtual orders were executed
     /// @member orderPool0For1 Order pool trading token0 for token1 of pool
@@ -61,8 +89,10 @@ contract TWAMM is BaseHook, ITWAMM {
     // tokensOwed[token][owner] => amountOwed
     mapping(Currency => mapping(address => uint256)) public tokensOwed;
 
-    constructor(IPoolManager _manager, uint256 _expirationInterval) BaseHook(_manager) {
+    constructor(IPoolManager _manager, uint256 _expirationInterval, address _daoToken, address _treasury) BaseHook(_manager) {
         expirationInterval = _expirationInterval;
+        daoToken = IERC20Minimal(_daoToken);
+        treasury = _treasury;
     }
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
@@ -140,6 +170,76 @@ contract TWAMM is BaseHook, ITWAMM {
         self.lastVirtualOrderTimestamp = block.timestamp;
     }
 
+    // @notice New Create a Proposale to update Order
+    function createProposal(uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne) external {
+        require(daoToken.balanceOf(msg.sender) >= MIN_PROPOSAL_THRESHOLD, "Insufficient tokens to propose");
+
+        proposalCount++;
+        proposals[proposalCount] = Proposal({
+            id: proposalCount,
+            proposer: msg.sender,
+            amount: amount,
+            salesRate: salesRate,
+            duration: duration,
+            zeroForOne: zeroForOne,
+            votesFor: 0,
+            votesAgainst: 0,
+            endTime: block.timestamp + VOTING_PERIOD,
+            executed: false
+        });
+
+        emit ProposalCreated(proposalCount, msg.sender, amount, salesRate, duration, zeroForOne);
+    }
+
+    /// @notice Vote on a proposal
+    function castVote(uint256 proposalId, bool support) external {
+        Proposal storage proposal = proposals[proposalId];
+        require(block.timestamp <= proposal.endTime, "Voting period ended");
+        require(!proposal.executed, "Proposal already executed");
+
+        uint256 votes = daoToken.balanceOf(msg.sender);
+        require(votes > 0, "No voting power");
+
+        if (support) {
+            proposal.votesFor += votes;
+        } else {
+            proposal.votesAgainst += votes;
+        }
+
+        emit Voted(proposalId, msg.sender, support, votes);
+    }
+
+    // @notice Execute a proposal
+    function executeProposal(uint256 proposalId, PoolKey calldata poolKey) external {
+        Proposal storage proposal = proposals[proposalId];
+        require(block.timestamp > proposal.endTime + EXECUTION_DELAY, "Execution delay not met");
+        require(!proposal.executed, "Proposal already executed");
+        require(proposal.votesFor > proposal.votesAgainst, "Proposal did not pass");
+
+        // Create the TWAMM order
+        OrderKey memory orderKey = OrderKey({
+            owner: treasury,
+            expiration: uint160(block.timestamp + proposal.duration),
+            zeroForOne: proposal.zeroForOne
+        });
+
+        // Ensure the treasury approves this contract to spend tokens
+        if (proposal.zeroForOne) {
+            require(IERC20Minimal(Currency.unwrap(poolKey.currency0)).allowance(treasury, address(this)) >= proposal.amount, "Insufficient allowance");
+            IERC20Minimal(Currency.unwrap(poolKey.currency0)).transferFrom(treasury, address(this), proposal.amount);
+            IERC20Minimal(Currency.unwrap(poolKey.currency0)).approve(address(this), proposal.amount);
+        } else {
+            require(IERC20Minimal(Currency.unwrap(poolKey.currency1)).allowance(treasury, address(this)) >= proposal.amount, "Insufficient allowance");
+            IERC20Minimal(Currency.unwrap(poolKey.currency1)).transferFrom(treasury, address(this), proposal.amount);
+            IERC20Minimal(Currency.unwrap(poolKey.currency1)).approve(address(this), proposal.amount);
+        }
+
+        submitOrder(poolKey, orderKey, proposal.amount);
+
+        proposal.executed = true;
+        emit ProposalExecuted(proposalId);
+    }
+
     /// @inheritdoc ITWAMM
     function executeTWAMMOrders(PoolKey memory key) public {
         PoolId poolId = key.toId();
@@ -158,22 +258,24 @@ contract TWAMM is BaseHook, ITWAMM {
     }
 
     /// @inheritdoc ITWAMM
+    // updated for governance
     function submitOrder(PoolKey calldata key, OrderKey memory orderKey, uint256 amountIn)
-        external
+        public // Changed from external to public
         returns (bytes32 orderId)
     {
+        require(msg.sender == address(this) || orderKey.owner == msg.sender, "Unauthorized");
+        
         PoolId poolId = PoolId.wrap(keccak256(abi.encode(key)));
         State storage twamm = twammStates[poolId];
         executeTWAMMOrders(key);
 
         uint256 sellRate;
         unchecked {
-            // checks done in TWAMM library
             uint256 duration = orderKey.expiration - block.timestamp;
             sellRate = amountIn / duration;
             orderId = _submitOrder(twamm, orderKey, sellRate);
             IERC20Minimal(orderKey.zeroForOne ? Currency.unwrap(key.currency0) : Currency.unwrap(key.currency1))
-                .safeTransferFrom(msg.sender, address(this), sellRate * duration);
+                .safeTransferFrom(msg.sender == address(this) ? treasury : msg.sender, address(this), sellRate * duration);
         }
 
         emit SubmitOrder(

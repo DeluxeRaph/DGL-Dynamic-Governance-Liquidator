@@ -45,6 +45,10 @@ To integrate DGL into your DAO's treasury management strategy, follow these step
 3. **Configure Governance Rules**: Set up the governance logic to dictate how the TWAMM orders should be managed.
 4. **Submit Orders**: Use the DGL interface to submit buy or sell orders for your DAO's governance tokens.
 
+forge build 
+
+forge test 
+
 ## Contribution
 
 We welcome contributions from the community to improve DGL. Please feel free to open issues or submit pull requests.
