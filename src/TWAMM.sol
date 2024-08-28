@@ -177,7 +177,7 @@ contract TWAMM is BaseHook, ITWAMM {
     if (daoToken.balanceOf(msg.sender) < MIN_PROPOSAL_THRESHOLD) {
         revert InsufficientTokensToPropose();
     }
-        proposalCount++;
+
         proposals[proposalCount] = Proposal({
             id: proposalCount,
             proposer: msg.sender,
@@ -190,6 +190,8 @@ contract TWAMM is BaseHook, ITWAMM {
             endTime: block.timestamp + VOTING_PERIOD,
             executed: false
         });
+
+        proposalCount++;
 
         emit ProposalCreated(proposalCount, msg.sender, amount, salesRate, duration, zeroForOne);
     }

@@ -25,6 +25,10 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
+    address alice;
+
+    uint256 public constant MIN_PROPOSAL_THRESHOLD = 1e18;
+
     event SubmitOrder(
         PoolId indexed poolId,
         address indexed owner,
@@ -59,17 +63,26 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
     PoolId poolId;
 
     function setUp() public {
+        // What is this?
         deployFreshManagerAndRouters();
+        // Why do we need two currencies?
         (currency0, currency1) = deployMintAndApprove2Currencies();
 
+        // I think token0 should be the token0
         token0 = MockERC20(Currency.unwrap(currency0));
         token1 = MockERC20(Currency.unwrap(currency1));
         daoToken = new MockERC20("DAO Token", "DAO", 18);
+
+        // What should the treasury hold? I think Eth and daotoken
         treasury = address(0x1234);
 
+        // What is the TWAMMImplementation? Looks like you use this to build a TWAMM kindof like a factory
         TWAMMImplementation impl = new TWAMMImplementation(manager, 10_000, twamm, address(daoToken), treasury);
+        // writes? it is a bytes32 Array. Looks like we are writing directly to memory. Why?
         (, bytes32[] memory writes) = vm.accesses(address(impl));
+        // What is vm.etch?
         vm.etch(address(twamm), address(impl).code);
+
         unchecked {
             for (uint256 i = 0; i < writes.length; i++) {
                 bytes32 slot = writes[i];
@@ -77,8 +90,10 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
             }
         }
 
+        // Starting our pool lp pool
         (poolKey, poolId) = initPool(currency0, currency1, twamm, 3000, SQRT_PRICE_1_1, ZERO_BYTES);
 
+        // Why are we modifing the rounter
         token0.approve(address(modifyLiquidityRouter), 100 ether);
         token1.approve(address(modifyLiquidityRouter), 100 ether);
         token0.mint(address(this), 100 ether);
@@ -95,18 +110,33 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
             ZERO_BYTES
         );
 
-        // Mint some DAO tokens for testing
-        daoToken.mint(address(this), 100 ether);
-        daoToken.mint(address(0x1), 50 ether);
-        daoToken.mint(address(0x2), 25 ether);
+       // Mint DAO tokens to Alice
+    daoToken.mint(alice, 100 ether);
 
-            // Approve TWAMM to spend tokens
+    // Alice approves TWAMM to spend her DAO tokens
+    vm.prank(alice);
     daoToken.approve(address(twamm), type(uint256).max);
-    vm.prank(address(0x1));
-    daoToken.approve(address(twamm), type(uint256).max);
-    vm.prank(address(0x2));
-    daoToken.approve(address(twamm), type(uint256).max);
+
+    //     // Mint some DAO tokens for testing
+    //     daoToken.mint(address(this), 100 ether);
+    //     daoToken.mint(address(0x1), 50 ether);
+    //     daoToken.mint(address(0x2), 25 ether);
+
+    //         // Approve TWAMM to spend tokens
+    // daoToken.approve(address(twamm), type(uint256).max);
+    // vm.prank(address(0x1));
+    // daoToken.approve(address(twamm), type(uint256).max);
+    // vm.prank(address(0x2));
+    // daoToken.approve(address(twamm), type(uint256).max);
     }
+
+    // modifier alice() {
+    //     vm.startPrank(alice);
+    //     usdc.approve(address(clubPool), stakeAmount);
+    //     clubPool.join(1);
+    //     vm.stopPrank();
+    //     _;
+    // }
 
     // This checking the last order that took place?
     function testTWAMM_beforeInitialize_SetsLastVirtualOrderTimestamp() public {
@@ -450,21 +480,27 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         twamm.submitOrder(poolKey, key2, amount);
     }
 
-// function testCreateProposal() public {
-//     vm.expectEmit(true, true, true, true);
-//     emit ProposalCreated(1, address(this), 1 ether, 0.1 ether, 7 days, true);
-//     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+function testCreateProposal() public {
+    // Testing if event is emitted
+    // vm.expectEmit(true, true, true, true);
+    // emit ProposalCreated(1, address(this), 1 ether, 0.1 ether, 7 days, true);
 
-//     (uint256 id, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne, , , uint256 endTime, bool executed) = twamm.proposals(1);
-//     assertEq(id, 1);
-//     assertEq(proposer, address(this));
-//     assertEq(amount, 1 ether);
-//     assertEq(salesRate, 0.1 ether);
-//     assertEq(duration, 7 days);
-//     assertTrue(zeroForOne);
-//     assertEq(endTime, block.timestamp + 3 days);
-//     assertFalse(executed);
-// }
+    vm.startPrank(alice);
+
+        // daoToken.approve(address(this), MIN_PRICE_LIMIT);
+        twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
+        vm.stopPrank();
+
+    (uint256 id, address proposer, uint256 amount, uint256 salesRate, uint256 duration, bool zeroForOne, , , uint256 endTime, bool executed) = twamm.proposals(1);
+    assertEq(id, 1);
+    assertEq(proposer, address(this));
+    assertEq(amount, 1 ether);
+    assertEq(salesRate, 0.1 ether);
+    assertEq(duration, 7 days);
+    assertTrue(zeroForOne);
+    assertEq(endTime, block.timestamp + 3 days);
+    assertFalse(executed);
+}
 
 // function testCastVote() public {
 //     twamm.createProposal(1 ether, 0.1 ether, 7 days, true);
