@@ -54,6 +54,10 @@ contract TWAMM is BaseHook, ITWAMM {
         mapping(bytes32 => Order) orders;
     }
 
+    event TransferOrderOwnership(
+        PoolId indexed poolId, address indexed oldOwner, address indexed newOwner, uint256 expiration, bool zeroForOne
+    );
+
     /// @inheritdoc ITWAMM
     uint256 public immutable expirationInterval;
     // twammStates[poolId] => Twamm.State
@@ -653,5 +657,35 @@ contract TWAMM is BaseHook, ITWAMM {
 
     function _hasOutstandingOrders(State storage self) internal view returns (bool) {
         return self.orderPool0For1.sellRateCurrent != 0 || self.orderPool1For0.sellRateCurrent != 0;
+    }
+
+    /// @notice Changes the owner of an existing order
+    /// @param key The PoolKey for the pool containing the order
+    /// @param orderKey The OrderKey of the order to be transferred
+    /// @param newOwner The address of the new owner
+    function transferOrderOwnership(PoolKey calldata key, OrderKey calldata orderKey, address newOwner) external {
+        PoolId poolId = PoolId.wrap(keccak256(abi.encode(key)));
+        State storage twamm = twammStates[poolId];
+
+        bytes32 orderId = _orderId(orderKey);
+        Order storage order = twamm.orders[orderId];
+
+        if (orderKey.owner != msg.sender) revert MustBeOwner(orderKey.owner, msg.sender);
+        if (order.sellRate == 0) revert OrderDoesNotExist(orderKey);
+        if (orderKey.expiration <= block.timestamp) revert CannotModifyCompletedOrder(orderKey);
+
+        // Create a new OrderKey with the new owner
+        OrderKey memory newOrderKey =
+            OrderKey({owner: newOwner, expiration: orderKey.expiration, zeroForOne: orderKey.zeroForOne});
+
+        bytes32 newOrderId = _orderId(newOrderKey);
+
+        // Transfer the order details to the new order ID
+        twamm.orders[newOrderId] = order;
+
+        // Delete the old order
+        delete twamm.orders[orderId];
+
+        emit TransferOrderOwnership(poolId, orderKey.owner, newOwner, orderKey.expiration, orderKey.zeroForOne);
     }
 }

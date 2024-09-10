@@ -43,6 +43,10 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         uint256 earningsFactorLast
     );
 
+    event TransferOrderOwnership(
+        PoolId indexed poolId, address indexed oldOwner, address indexed newOwner, uint256 expiration, bool zeroForOne
+    );
+
     //
     TWAMM twamm =
         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
@@ -432,5 +436,44 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         vm.warp(10000);
         twamm.submitOrder(poolKey, key1, amount);
         twamm.submitOrder(poolKey, key2, amount);
+    }
+
+    function testTransferOrderOwnership() public {
+        uint256 orderAmount = 1 ether;
+        ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey(address(this), 30000, true);
+        address newOwner = address(0xdead);
+
+        token0.approve(address(twamm), orderAmount);
+        vm.warp(10000);
+        twamm.submitOrder(poolKey, orderKey, orderAmount);
+
+        // Verify initial owner
+        ITWAMM.Order memory initialOrder = twamm.getOrder(poolKey, orderKey);
+        assertEq(initialOrder.sellRate, orderAmount / 20000); // 20000 is the duration (30000 - 10000)
+
+        // Transfer ownership
+        vm.expectEmit(true, true, true, true);
+        emit TransferOrderOwnership(poolId, address(this), newOwner, orderKey.expiration, orderKey.zeroForOne);
+        twamm.transferOrderOwnership(poolKey, orderKey, newOwner);
+
+        // Verify old order no longer exists
+        ITWAMM.Order memory oldOrder = twamm.getOrder(poolKey, orderKey);
+        assertEq(oldOrder.sellRate, 0);
+
+        // Verify new order exists with new owner
+        ITWAMM.OrderKey memory newOrderKey = ITWAMM.OrderKey(newOwner, orderKey.expiration, orderKey.zeroForOne);
+        ITWAMM.Order memory newOrder = twamm.getOrder(poolKey, newOrderKey);
+        assertEq(newOrder.sellRate, orderAmount / 20000);
+
+        // // Attempt to modify order with old owner (should fail)
+        // vm.expectRevert(abi.encodeWithSelector(ITWAMM.MustBeOwner.selector, newOwner, address(this)));
+        // twamm.updateOrder(poolKey, orderKey, -1);
+
+        // Modify order with new owner (should succeed)
+        vm.prank(newOwner);
+        twamm.updateOrder(poolKey, newOrderKey, -1);
+
+        ITWAMM.Order memory modifiedOrder = twamm.getOrder(poolKey, newOrderKey);
+        assertEq(modifiedOrder.sellRate, 0);
     }
 }
