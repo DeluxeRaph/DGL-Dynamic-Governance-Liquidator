@@ -4,7 +4,7 @@ pragma solidity ^0.8.23;
 import "../TWAMM.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Wrapper.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 contract TWAMMGovernance is TWAMM {
     ERC20Votes public governanceToken;
     uint256 public proposalCount;
@@ -16,7 +16,6 @@ contract TWAMMGovernance is TWAMM {
         uint256 id;
         address proposer;
         uint256 amount;
-        uint256 salesRate;
         uint256 duration;
         bool zeroForOne;
         uint256 votesFor;
@@ -49,7 +48,6 @@ contract TWAMMGovernance is TWAMM {
             id: proposalId,
             proposer: msg.sender,
             amount: amount,
-            salesRate: salesRate,
             duration: duration,
             zeroForOne: zeroForOne,
             votesFor: 0,
@@ -86,22 +84,28 @@ contract TWAMMGovernance is TWAMM {
 
         proposal.executed = true;
 
-        // Execute the proposal by calling the appropriate TWAMM function
-        // This is a simplified example and may need to be adjusted based on your specific requirements
-        PoolKey memory poolKey; // You'll need to determine how to get the correct PoolKey
+        
+        PoolKey memory poolKey = getPoolKey();
+        PoolId poolId = PoolId.wrap(keccak256(abi.encode(poolKey)));
+        State storage twamm = twammStates[poolId];
         OrderKey memory orderKey = OrderKey({
             owner: address(this),
-            expiration: block.timestamp + proposal.duration,
+            expiration: uint160(block.timestamp + proposal.duration),
             zeroForOne: proposal.zeroForOne
         });
         
-        _submitOrder(poolKey, orderKey, proposal.amount);
+        _submitOrder(twamm, orderKey, proposal.amount);
 
         emit ProposalExecuted(proposalId);
     }
+
+    // You need to implement this function to return the correct PoolKey
+function getPoolKey() internal view returns (PoolKey memory) {
+    // Implementation depends on how you're storing or deriving the PoolKey
+}
 }
 
-contract WrappedGovernanceToken is ERC20, ERC20Wrapper, ERC20Votes{
+contract WrappedGovernanceToken is ERC20, ERC20Wrapper, ERC20Votes, ERC20Permit {
     constructor(IERC20 wrappedToken)
         ERC20("Wrapped Governance Token", "wGOV")
         ERC20Permit("Wrapped Governance Token")
@@ -114,27 +118,20 @@ contract WrappedGovernanceToken is ERC20, ERC20Wrapper, ERC20Votes{
         return super.decimals();
     }
 
-    // The following functions are overrides required by Solidity
-
-    function _afterTokenTransfer(address from, address to, uint256 amount)
+    function _update(address from, address to, uint256 amount)
         internal
         override(ERC20, ERC20Votes)
     {
-        super._afterTokenTransfer(from, to, amount);
+        super._update(from, to, amount);
     }
 
-    function _mint(address to, uint256 amount)
-        internal
-        override(ERC20)
+    function nonces(address owner)
+        public
+        view
+        override(ERC20Permit, Nonces)
+        returns (uint256)
     {
-        super._mint(to, amount);
-    }
-
-    function _burn(address account, uint256 amount)
-        internal
-        override(ERC20)
-    {
-        super._burn(account, amount);
+        return super.nonces(owner);
     }
     
 }
