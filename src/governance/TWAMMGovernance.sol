@@ -88,6 +88,8 @@ contract TWAMMGovernance is TWAMM {
         emit ProposalCreated(proposalId, msg.sender, amount, duration, zeroForOne);
     }
 
+    
+
     function vote(uint256 proposalId, bool support) external {
         Proposal storage proposal = proposals[proposalId];
         require(block.timestamp < proposal.endTime, "Voting period has ended");
