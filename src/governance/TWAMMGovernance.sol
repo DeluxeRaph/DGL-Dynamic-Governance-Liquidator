@@ -6,6 +6,7 @@ import {TWAMMImplementation} from "../implementation/TWAMMImplementation.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Wrapper.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 contract TWAMMGovernance is TWAMM {
     ERC20Votes public governanceToken;
@@ -18,6 +19,8 @@ contract TWAMMGovernance is TWAMM {
 
     TWAMM flags =
         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
+
+    PoolKey public poolKey;
 
     struct Proposal {
         uint256 id;
@@ -32,7 +35,7 @@ contract TWAMMGovernance is TWAMM {
         bool executed;
     }
 
-    mapping(uint256 => Proposal) internal proposals;
+    mapping(uint256 => Proposal) public proposals;
     mapping(address => mapping(uint256 => bool)) public hasVoted;
 
     event ProposalCreated(
@@ -46,12 +49,15 @@ contract TWAMMGovernance is TWAMM {
     event ProposalExecuted(uint256 indexed proposalId);
     event ProposalFailed(uint256 indexed proposalId, string reason);
 
-    constructor(IPoolManager _manager, uint256 _expirationInterval, IERC20 _underlyingToken)
-        TWAMM(_manager, _expirationInterval)
-    {
+    constructor(
+        IPoolManager _manager,
+        uint256 _expirationInterval,
+        IERC20 _underlyingToken,
+        PoolKey memory _poolKey
+    ) TWAMM(_manager, _expirationInterval) {
         governanceToken = new WrappedGovernanceToken(_underlyingToken);
         new TWAMMImplementation(_manager, _expirationInterval, flags);
-        
+        poolKey = _poolKey;
     }
 
     function createProposal(uint256 amount, uint256 duration, bool zeroForOne) external {
@@ -110,6 +116,7 @@ contract TWAMMGovernance is TWAMM {
         emit Voted(proposalId, msg.sender, support, votes);
     }
 
+
     function executeProposal(uint256 proposalId) external {
         Proposal storage proposal = proposals[proposalId];
         require(block.timestamp >= proposal.endTime, "Voting period not ended");
@@ -132,8 +139,8 @@ contract TWAMMGovernance is TWAMM {
 
         proposal.executed = true;
 
-        PoolKey memory poolKey = getPoolKey();
-        PoolId poolId = PoolId.wrap(keccak256(abi.encode(poolKey)));
+        PoolKey memory currentPoolKey = poolKey; // Use a different name for the local variable
+        PoolId poolId = PoolId.wrap(keccak256(abi.encode(currentPoolKey)));
         State storage twamm = twammStates[poolId];
         OrderKey memory orderKey = OrderKey({
             owner: address(this),
@@ -151,9 +158,8 @@ contract TWAMMGovernance is TWAMM {
         return proposals[proposalId];
     }
 
-    // You need to implement this function to return the correct PoolKey
-    function getPoolKey() internal view returns (PoolKey memory) {
-        // Implementation depends on how you're storing or deriving the PoolKey
+    function getPoolKey() public view returns (PoolKey memory) {
+        return poolKey;
     }
 }
 
