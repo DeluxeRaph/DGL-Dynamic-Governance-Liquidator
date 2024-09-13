@@ -2,20 +2,27 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
+import "../src/TWAMM.sol";
+import "../src/mocks/MockDaoToken.sol";
+import "../src/governance/WrappedGovernanceToken.sol";
 import {TWAMMGovernance} from "../src/governance/TWAMMGovernance.sol";
 import {TWAMMQuoter} from "../src/quoter/TWAMMQuoter.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {IQuoter} from "v4-periphery/src/interfaces/IQuoter.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 contract TWAMMQuoterTest is Test {
     IPoolManager poolManager;
     IQuoter quoter;
     TWAMMGovernance governance;
+    WrappedGovernanceToken governanceToken;
+    MockDAOToken public daoToken;
     TWAMMQuoter twammQuoter;
+    TWAMM flags =
+        TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
 
     PoolKey poolKey;
     uint256 initialProposalAmount = 1e18;
@@ -28,31 +35,33 @@ contract TWAMMQuoterTest is Test {
 
         // Create pool key
         poolKey = PoolKey({
-            currency0: address(new MockERC20("Test Token 0", "T0", 18)),
-            currency1: address(new MockERC20("Test Token 1", "T1", 18)),
+            currency0: Currency.wrap(address(new MockERC20("Test Token 0", "T0", 18))),
+            currency1: Currency.wrap(address(new MockERC20("Test Token 1", "T1", 18))),
             fee: 3000,
             tickSpacing: 60,
-            hooks: address(0)
+            hooks: flags
         });
 
         // Deploy governance contract
         governance = new TWAMMGovernance(
             poolManager,
             1 weeks,
-            IERC20Minimal(address(new MockERC20("Governance Token", "GT", 18))),
-            poolKey
+            IERC20(address(daoToken)),
+            poolKey.currency0,
+            poolKey.currency1,
+            poolKey.fee,
+            poolKey.tickSpacing
         );
 
         // Deploy TWAMMQuoter
-        twammQuoter = new TWAMMQuoter(address(poolManager), address(governance), address(quoter));
+        twammQuoter = new TWAMMQuoter(address(poolManager), address(governance), address(quoter), poolKey);
     }
 
     function testCreateGovernanceProposal() public {
-        // Mint governance tokens and create a proposal
-        ERC20Votes governanceToken = ERC20Votes(address(governance.governanceToken()));
+        
         governanceToken.mint(address(this), 200 * 10**18); // mint to meet the proposal threshold
 
-        governance.createProposal(initialProposalAmount, 1e18, 7 days, zeroForOne);
+        governance.createProposal(initialProposalAmount, 7 days, zeroForOne);
 
         // Check proposal created
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(0);
@@ -94,10 +103,9 @@ contract TWAMMQuoterTest is Test {
     }
 
     function createSampleProposal() internal {
-        ERC20Votes governanceToken = ERC20Votes(address(governance.governanceToken()));
         governanceToken.mint(address(this), 200 * 10**18);  // Mint governance tokens for proposal creation
 
-        governance.createProposal(initialProposalAmount, 1e18, 7 days, zeroForOne);
+        governance.createProposal(initialProposalAmount, 7 days, zeroForOne);
     }
 
     event QuotedSwap(uint256 indexed proposalId, int128[] deltaAmounts, uint160 sqrtPriceX96After);

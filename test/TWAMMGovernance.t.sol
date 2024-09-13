@@ -3,13 +3,9 @@ pragma solidity ^0.8.23;
 
 import "forge-std/Test.sol";
 import "../src/governance/TWAMMGovernance.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-
-contract MockDAOToken is ERC20 {
-    constructor() ERC20("Mock DAO Token", "MDT") {
-        _mint(msg.sender, 1000000e18); // Mint 1 million tokens
-    }
-}
+import "../src/mocks/MockDaoToken.sol";
+import "@uniswap/v4-core/src/libraries/Hooks.sol";
+import "@uniswap/v4-core/src/types/Currency.sol";
 
 contract TWAMMGovernanceTest is Test {
     TWAMMGovernance public governance;
@@ -18,21 +14,19 @@ contract TWAMMGovernanceTest is Test {
     address public bob = address(0x2);
     address public charlie = address(0x3);
 
-    address constant HOOK_ADDRESS = address(uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG));
-
+    TWAMM flags =
+        TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
     function setUp() public {
         daoToken = new MockDAOToken();
-        governance = new TWAMMGovernance(IPoolManager(address(0x123)), 10000, IERC20(address(daoToken)));
-
-        // (, bytes32[] memory writes) = vm.accesses(address(governance));
-        // vm.etch(address(governance), address(governance).code);
-        // // for each storage key that was written during the hook implementation, copy the value over
-        // unchecked {
-        //     for (uint256 i = 0; i < writes.length; i++) {
-        //         bytes32 slot = writes[i];
-        //         vm.store(address(governance), slot, vm.load(address(governance), slot));
-        //     }
-        // }
+        governance = new TWAMMGovernance(
+            IPoolManager(address(0x123)),
+            10000,
+            IERC20(address(daoToken)),
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            3000,
+            60
+        );
         
         // Distribute tokens
         daoToken.transfer(alice, 200000e18);
@@ -63,10 +57,8 @@ contract TWAMMGovernanceTest is Test {
         governance.createProposal(100e18, 7 days, true);
         
         uint256 proposalId = governance.proposalCount() - 1;
-        // Get the proposal as a single struct
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
 
-        // Now we can access the struct fields directly
         assertEq(proposal.startTime, startTime, "Start time should match");
         assertEq(proposal.endTime, startTime + 7 days, "End time should be 7 days after start");
     }
@@ -80,7 +72,7 @@ contract TWAMMGovernanceTest is Test {
         governance.vote(proposalId, true);
 
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
-        assertEq(proposal.votesFor, 200000e18);
+        assertEq(proposal.votes.forVotes, 1);
     }
 
     function testTrackingYayAndNayVotes() public {
@@ -94,8 +86,8 @@ contract TWAMMGovernanceTest is Test {
         governance.vote(proposalId, false);
 
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
-        assertEq(proposal.votesFor, 200000e18);
-        assertEq(proposal.votesAgainst, 200000e18);
+        assertEq(proposal.votes.forVotes, 1);
+        assertEq(proposal.votes.againstVotes, 1);
     }
 
     function testMinimum25PercentParticipation() public {
@@ -111,8 +103,15 @@ contract TWAMMGovernanceTest is Test {
         vm.expectRevert("Insufficient participation");
         governance.executeProposal(proposalId);
 
-        vm.prank(charlie);
-        governance.vote(proposalId, false);
+        // We need many more votes to reach 25% participation
+        for (uint i = 0; i < 250000; i++) {
+            address voter = address(uint160(i + 1000));
+            daoToken.transfer(voter, 1e18);
+            vm.prank(voter);
+            daoToken.approve(address(governance), 1e18);
+            vm.prank(voter);
+            governance.vote(proposalId, true);
+        }
 
         governance.executeProposal(proposalId);
     }
@@ -126,6 +125,16 @@ contract TWAMMGovernanceTest is Test {
         governance.vote(proposalId, false);
         vm.prank(charlie);
         governance.vote(proposalId, false);
+
+        // Add more votes to reach minimum participation
+        for (uint i = 0; i < 250000; i++) {
+            address voter = address(uint160(i + 1000));
+            daoToken.transfer(voter, 1e18);
+            vm.prank(voter);
+            daoToken.approve(address(governance), 1e18);
+            vm.prank(voter);
+            governance.vote(proposalId, false);
+        }
 
         vm.warp(block.timestamp + 7 days + 1);
 
@@ -141,10 +150,15 @@ contract TWAMMGovernanceTest is Test {
         governance.createProposal(100e18, 7 days, true);
         uint256 proposalId = governance.proposalCount() - 1;
 
-        vm.prank(bob);
-        governance.vote(proposalId, true);
-        vm.prank(charlie);
-        governance.vote(proposalId, true);
+        // Add votes to reach minimum participation and pass the proposal
+        for (uint i = 0; i < 250000; i++) {
+            address voter = address(uint160(i + 1000));
+            daoToken.transfer(voter, 1e18);
+            vm.prank(voter);
+            daoToken.approve(address(governance), 1e18);
+            vm.prank(voter);
+            governance.vote(proposalId, true);
+        }
 
         vm.warp(block.timestamp + 7 days + 1);
 
@@ -154,5 +168,76 @@ contract TWAMMGovernanceTest is Test {
         assertEq(proposal.executed, true);
         // You should add a check here to ensure the TWAMM was actually updated
         // This might involve mocking the TWAMM contract or checking state changes
+    }
+
+    function testTokenLocking() public {
+        vm.prank(alice);
+        governance.createProposal(100e18, 7 days, true);
+        uint256 proposalId = governance.proposalCount() - 1;
+
+        uint256 bobBalanceBefore = daoToken.balanceOf(bob);
+        vm.prank(bob);
+        governance.vote(proposalId, true);
+        uint256 bobBalanceAfter = daoToken.balanceOf(bob);
+
+        assertEq(bobBalanceBefore - bobBalanceAfter, 1, "One token should be locked");
+        assertEq(governance.lockedTokens(bob), 1, "One token should be recorded as locked");
+    }
+
+    function testTokenWithdrawal() public {
+        vm.prank(alice);
+        governance.createProposal(100e18, 7 days, true);
+        uint256 proposalId = governance.proposalCount() - 1;
+
+        vm.prank(bob);
+        governance.vote(proposalId, true);
+
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Add more votes to reach minimum participation
+        for (uint i = 0; i < 250000; i++) {
+            address voter = address(uint160(i + 1000));
+            daoToken.transfer(voter, 1e18);
+            vm.prank(voter);
+            daoToken.approve(address(governance), 1e18);
+            vm.prank(voter);
+            governance.vote(proposalId, true);
+        }
+
+        governance.executeProposal(proposalId);
+
+        uint256 bobBalanceBefore = daoToken.balanceOf(bob);
+        vm.prank(bob);
+        governance.withdrawTokens(proposalId);
+        uint256 bobBalanceAfter = daoToken.balanceOf(bob);
+
+        assertEq(bobBalanceAfter - bobBalanceBefore, 1, "One token should be withdrawn");
+        assertEq(governance.lockedTokens(bob), 0, "No tokens should remain locked");
+    }
+
+    function testCannotWithdrawBeforeExecution() public {
+        vm.prank(alice);
+        governance.createProposal(100e18, 7 days, true);
+        uint256 proposalId = governance.proposalCount() - 1;
+
+        vm.prank(bob);
+        governance.vote(proposalId, true);
+
+        vm.expectRevert("Proposal not yet executed");
+        vm.prank(bob);
+        governance.withdrawTokens(proposalId);
+    }
+
+    function testCannotVoteTwice() public {
+        vm.prank(alice);
+        governance.createProposal(100e18, 7 days, true);
+        uint256 proposalId = governance.proposalCount() - 1;
+
+        vm.prank(bob);
+        governance.vote(proposalId, true);
+
+        vm.expectRevert("Already voted on this proposal");
+        vm.prank(bob);
+        governance.vote(proposalId, true);
     }
 }

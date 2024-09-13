@@ -14,20 +14,23 @@ contract TWAMMQuoter {
     IPoolManager public poolManager;
     TWAMMGovernance public governanceContract;
 
+    PoolKey public poolKey;
+
     uint160 constant MIN_SQRT_RATIO = 4295128739;
     uint160 constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
 
     event QuotedSwap(uint256 indexed proposalId, int128[] deltaAmounts, uint160 sqrtPriceX96After);
 
-    constructor(address _poolManager, address _governanceContract, address _quoter) {
+    constructor(address _poolManager, address _governanceContract, address _quoter, PoolKey memory _poolKey) {
         poolManager = IPoolManager(_poolManager);
         governanceContract = TWAMMGovernance(_governanceContract);
         quoter = IQuoter(_quoter);
+        poolKey = _poolKey;
     }
 
     function quoteProposalExactInput(uint256 proposalId) public returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
         TWAMMGovernance.Proposal memory proposal = governanceContract.getProposal(proposalId);
-        PoolKey memory poolKey = governanceContract.getPoolKey();
+        
         
         uint160 MAX_SLIPPAGE = proposal.zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
 
@@ -46,7 +49,6 @@ contract TWAMMQuoter {
 
     function quoteProposalExactOutput(uint256 proposalId) public returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
         TWAMMGovernance.Proposal memory proposal = governanceContract.getProposal(proposalId);
-        PoolKey memory poolKey = governanceContract.getPoolKey();
 
         uint160 MAX_SLIPPAGE = proposal.zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
 
