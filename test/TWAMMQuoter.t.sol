@@ -14,7 +14,6 @@ import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 contract TWAMMQuoterTest is Test, Deployers {
-    using PoolKey for PoolKey;
 
     IPoolManager poolManager;
     IQuoter quoter;

@@ -8,6 +8,7 @@ import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Mini
 import {TWAMMGovernance} from "../governance/TWAMMGovernance.sol";
 import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 contract TWAMMQuoter {
     IQuoter public quoter;
@@ -26,7 +27,7 @@ contract TWAMMQuoter {
     /// @param proposalId The ID of the governance proposal
     /// @return deltaAmounts The token amounts resulting from the quote
     /// @return sqrtPriceX96After The price after the swap
-    function quoteProposalExactInput(uint256 proposalId) external returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
+    function quoteProposalExactInput(uint256 proposalId) public returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
         TWAMMGovernance.Proposal memory proposal = governanceContract.proposals(proposalId);
         
         PoolKey memory key = governanceContract.getPoolKey();
@@ -52,7 +53,7 @@ contract TWAMMQuoter {
     /// @param proposalId The ID of the governance proposal
     /// @return deltaAmounts The token amounts resulting from the quote
     /// @return sqrtPriceX96After The price after the swap
-    function quoteProposalExactOutput(uint256 proposalId) external returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
+    function quoteProposalExactOutput(uint256 proposalId) public returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
         TWAMMGovernance.Proposal memory proposal = governanceContract.proposals(proposalId);
 
         PoolKey memory key = governanceContract.getPoolKey();

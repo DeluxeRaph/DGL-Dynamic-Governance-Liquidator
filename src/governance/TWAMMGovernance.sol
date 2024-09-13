@@ -13,16 +13,16 @@ contract TWAMMGovernance is TWAMM {
     uint256 public constant VOTING_PERIOD = 7 days;
 
     struct Proposal {
-        uint256 id;
-        address proposer;
-        uint256 amount;
-        uint256 duration;
-        bool zeroForOne;
-        uint256 votesFor;
-        uint256 votesAgainst;
-        uint256 endTime;
-        bool executed;
-    }
+    uint256 id;
+    address proposer;
+    uint256 amount;
+    uint256 duration;
+    bool zeroForOne;
+    uint256 votesFor;
+    uint256 votesAgainst;
+    uint256 endTime;
+    bool executed;
+}
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -58,6 +58,8 @@ contract TWAMMGovernance is TWAMM {
 
         emit ProposalCreated(proposalId, msg.sender, amount, salesRate, duration, zeroForOne);
     }
+
+    
 
     function vote(uint256 proposalId, bool support) external {
         Proposal storage proposal = proposals[proposalId];
