@@ -51,8 +51,10 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
     TWAMM twamm =
         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
     address hookAddress;
+    address daoAddress; 
     MockERC20 token0;
     MockERC20 token1;
+    MockERC20 daoToken;
     PoolKey poolKey;
     PoolId poolId;
 
@@ -476,4 +478,6 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         ITWAMM.Order memory modifiedOrder = twamm.getOrder(poolKey, newOrderKey);
         assertEq(modifiedOrder.sellRate, 0);
     }
+
+    
 }
