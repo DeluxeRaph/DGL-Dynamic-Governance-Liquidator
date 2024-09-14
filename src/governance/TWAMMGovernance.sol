@@ -3,10 +3,16 @@ pragma solidity ^0.8.23;
 
 import "../TWAMM.sol";
 import "./WrappedGovernanceToken.sol";
-import {TWAMMImplementation} from "../implementation/TWAMMImplementation.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@uniswap/v4-core/src/types/Currency.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
-contract TWAMMGovernance is TWAMM {
+
+
+contract TWAMMGovernance {
     WrappedGovernanceToken public governanceToken;
     IERC20 public daoToken;
     uint256 public proposalCount;
@@ -21,30 +27,36 @@ contract TWAMMGovernance is TWAMM {
     Currency public immutable token1;
     uint24 public immutable fee;
     int24 public immutable tickSpacing;
+    IPoolManager public immutable manager;
+    uint256 public immutable expirationInterval;
+    //TWAMM public immutable twamm;
+    address public immutable twamm;
 
-    TWAMM flags =
-        TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
+    
 
-    struct Proposal {
-        uint256 id;
-        address proposer;
-        uint256 amount;
-        uint256 duration;
-        bool zeroForOne;
-        uint256 startTime;
-        uint256 endTime;
-        bool executed;
-        Vote votes;
-    }
+struct Proposal {
+    uint256 id;
+    address proposer;
+    uint256 amount;
+    uint256 duration;
+    bool zeroForOne;
+    uint256 startTime;
+    uint256 endTime;
+    bool executed;
+    Vote votes;
+    string description; // Assume this is the new field added
+}
+
 
     struct Vote {
         uint256 forVotes;
         uint256 againstVotes;
     }
+    
 
     mapping(uint256 => Proposal) internal proposals;
     mapping(address => mapping(uint256 => bool)) public hasVoted;
-    mapping(address => uint256) public lockedTokens;
+    mapping(address => mapping(uint256 => uint256)) public lockedTokens;
 
     event ProposalCreated(
         uint256 indexed proposalId,
@@ -59,26 +71,34 @@ contract TWAMMGovernance is TWAMM {
     event TokensWithdrawn(address indexed user, uint256 amount);
 
     constructor(
-        IPoolManager _manager,
-        uint256 _expirationInterval,
-        IERC20 _daoToken,
-        Currency _token0,
-        Currency _token1,
-        uint24 _fee,
-        int24 _tickSpacing
-    ) TWAMM(_manager, _expirationInterval) {
+    IPoolManager _manager,
+    uint256 _expirationInterval,
+    IERC20 _daoToken,
+    Currency _token0,
+    Currency _token1,
+    uint24 _fee,
+    int24 _tickSpacing,
+    address _twamm  // Accept twamm as address
+) {
+        manager = _manager;
+        expirationInterval = _expirationInterval;
         daoToken = _daoToken;
         governanceToken = new WrappedGovernanceToken(_daoToken);
-        new TWAMMImplementation(_manager, _expirationInterval, flags);
-        
+
         token0 = _token0;
         token1 = _token1;
         fee = _fee;
         tickSpacing = _tickSpacing;
+        twamm = _twamm;
     }
 
-    function createProposal(uint256 amount, uint256 duration, bool zeroForOne) external {
-        uint256 totalSupply = daoToken.totalSupply();
+function createProposal(
+    uint256 amount,
+    uint256 duration,
+    bool zeroForOne,
+    string memory proposalDescription // New parameter
+) external {
+            uint256 totalSupply = daoToken.totalSupply();
         uint256 proposerBalance = daoToken.balanceOf(msg.sender);
         
         require(
@@ -96,107 +116,119 @@ contract TWAMMGovernance is TWAMM {
         proposalCount++;
 
         proposals[proposalId] = Proposal({
-            id: proposalId,
-            proposer: msg.sender,
-            amount: amount,
-            duration: duration,
-            zeroForOne: zeroForOne,
-            startTime: block.timestamp,
-            endTime: block.timestamp + VOTING_PERIOD,
-            executed: false,
-            votes: Vote(0, 0)
-        });
+    id: proposalId,
+    proposer: msg.sender,
+    amount: amount,
+    duration: duration,
+    zeroForOne: zeroForOne,
+    startTime: block.timestamp,
+    endTime: block.timestamp + VOTING_PERIOD,
+    executed: false,
+    votes: Vote(0, 0),
+    description: proposalDescription // Provide the description
+});
 
         emit ProposalCreated(proposalId, msg.sender, amount, duration, zeroForOne);
     }
 
-    function vote(uint256 proposalId, bool support) external {
-        Proposal storage proposal = proposals[proposalId];
-        require(block.timestamp < proposal.endTime, "Voting period has ended");
-        require(!proposal.executed, "Proposal already executed");
-        require(!hasVoted[msg.sender][proposalId], "Already voted on this proposal");
-        require(daoToken.balanceOf(msg.sender) > 0, "No DAO tokens to vote with");
+    function vote(uint256 proposalId, bool support, uint256 voteWeight) external {
+    Proposal storage proposal = proposals[proposalId];
+    require(block.timestamp < proposal.endTime, "Voting period has ended");
+    require(!proposal.executed, "Proposal already executed");
+    require(!hasVoted[msg.sender][proposalId], "Already voted on this proposal");
+    require(daoToken.balanceOf(msg.sender) >= voteWeight, "Insufficient DAO tokens to vote with");
+    require(voteWeight > 0, "Vote weight must be greater than zero");
 
-        uint256 voteWeight = 1; // Each vote counts as 1
+    daoToken.transferFrom(msg.sender, address(this), voteWeight);
+    governanceToken.mint(msg.sender, voteWeight);
 
-        daoToken.transferFrom(msg.sender, address(this), voteWeight);
-        governanceToken.mint(msg.sender, voteWeight);
-
-        if (support) {
-            proposal.votes.forVotes += voteWeight;
-        } else {
-            proposal.votes.againstVotes += voteWeight;
-        }
-
-        hasVoted[msg.sender][proposalId] = true;
-        lockedTokens[msg.sender] += voteWeight;
-
-        emit Voted(proposalId, msg.sender, support);
+    if (support) {
+        proposal.votes.forVotes += voteWeight;
+    } else {
+        proposal.votes.againstVotes += voteWeight;
     }
+
+    hasVoted[msg.sender][proposalId] = true;
+    lockedTokens[msg.sender][proposalId] = voteWeight;
+
+    emit Voted(proposalId, msg.sender, support);
+}
+
 
     function executeProposal(uint256 proposalId) external {
-        Proposal storage proposal = proposals[proposalId];
-        require(block.timestamp >= proposal.endTime, "Voting period not ended");
-        require(!proposal.executed, "Proposal already executed");
+    Proposal storage proposal = proposals[proposalId];
+    require(block.timestamp > proposal.endTime, "Voting period not ended");
+    require(!proposal.executed, "Proposal already executed");
+    require(proposal.votes.forVotes > proposal.votes.againstVotes, "Proposal denied");
+    require(
+        (proposal.votes.forVotes + proposal.votes.againstVotes) * 4 >= daoToken.totalSupply(),
+        "Insufficient participation"
+    );
 
-        uint256 totalVotes = proposal.votes.forVotes + proposal.votes.againstVotes;
-        uint256 totalSupply = daoToken.totalSupply();
+    proposal.executed = true;
 
-        if (totalVotes < (totalSupply * MIN_PARTICIPATION_PERCENTAGE) / 100) {
-            proposal.executed = true;
-            emit ProposalFailed(proposalId, "Insufficient participation");
-            return;
-        }
+    // Create the PoolKey
+    PoolKey memory key = PoolKey({
+        currency0: token0,
+        currency1: token1,
+        fee: fee,
+        tickSpacing: tickSpacing,
+        hooks: IHooks(twamm)
+    });
 
-        if (proposal.votes.againstVotes >= proposal.votes.forVotes) {
-            proposal.executed = true;
-            emit ProposalFailed(proposalId, "More nays than yays");
-            return;
-        }
+    // Create the OrderKey
+    ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey({
+        owner: address(this),
+        expiration: uint160(block.timestamp + proposal.duration),
+        zeroForOne: proposal.zeroForOne
+    });
 
-        proposal.executed = true;
+    // Approve TWAMM to spend tokens
+    IERC20(proposal.zeroForOne ? Currency.unwrap(token0) : Currency.unwrap(token1)).approve(address(twamm), proposal.amount);
 
-        PoolKey memory poolKey = getPoolKey();
-        PoolId poolId = PoolId.wrap(keccak256(abi.encode(poolKey)));
-        State storage twamm = twammStates[poolId];
-        OrderKey memory orderKey = OrderKey({
-            owner: address(this),
-            expiration: uint160(block.timestamp + proposal.duration),
-            zeroForOne: proposal.zeroForOne
-        });
+    // Call submitOrder on TWAMM
+    bytes32 orderId = ITWAMM(twamm).submitOrder(key, orderKey, proposal.amount);
 
-        uint256 sellRate = proposal.amount / proposal.duration;
-        _submitOrder(twamm, orderKey, sellRate);
-
-        emit ProposalExecuted(proposalId);
-    }
+    emit ProposalExecuted(proposalId);
+    // You might want to emit the orderId as well
+    // emit OrderSubmitted(proposalId, orderId);
+}
 
     function withdrawTokens(uint256 proposalId) external {
-        Proposal storage proposal = proposals[proposalId];
-        require(proposal.executed, "Proposal not yet executed");
-        require(hasVoted[msg.sender][proposalId], "Did not vote on this proposal");
+    Proposal storage proposal = proposals[proposalId];
+    require(proposal.executed, "Proposal not yet executed");
+    require(hasVoted[msg.sender][proposalId], "Did not vote on this proposal");
 
-        uint256 amount = 1; // Each vote locked 1 token
-        lockedTokens[msg.sender] -= amount;
-        hasVoted[msg.sender][proposalId] = false;
+    uint256 amount = lockedTokens[msg.sender][proposalId];
+    require(amount > 0, "No tokens to withdraw");
 
-        governanceToken.burnFrom(msg.sender, amount);
-        daoToken.transfer(msg.sender, amount);
+    // Update state before external calls
+    lockedTokens[msg.sender][proposalId] = 0;
+    hasVoted[msg.sender][proposalId] = false;
 
-        emit TokensWithdrawn(msg.sender, amount);
-    }
+    // Burn the governance tokens
+    governanceToken.burnFrom(msg.sender, amount);
+
+    // Transfer back the DAO tokens
+    daoToken.transfer(msg.sender, amount);
+
+    emit TokensWithdrawn(msg.sender, amount);
+}
+
+
+
 
     function getProposal(uint256 proposalId) external view returns (Proposal memory) {
         return proposals[proposalId];
     }
 
-    function getPoolKey() internal view returns (PoolKey memory) {
-        return PoolKey({
-            currency0: token0,
-            currency1: token1,
-            fee: fee,
-            tickSpacing: tickSpacing,
-            hooks: flags
-        });
-    }
+   function getPoolKey() internal view returns (PoolKey memory) {
+    return PoolKey({
+        currency0: token0,
+        currency1: token1,
+        fee: fee,
+        tickSpacing: tickSpacing,
+        hooks: IHooks(twamm)
+    });
+}
 }

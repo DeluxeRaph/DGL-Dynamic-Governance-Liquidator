@@ -1,37 +1,114 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 import "forge-std/Test.sol";
 import "../src/governance/TWAMMGovernance.sol";
 import "../src/mocks/MockDaoToken.sol";
+import "../src/mocks/MockERC20.sol";
+import "../src/governance/WrappedGovernanceToken.sol";
+import {TWAMM} from "../src/TWAMM.sol";
+import {TWAMMImplementation} from "../src/implementation/TWAMMImplementation.sol";
 import "@uniswap/v4-core/src/libraries/Hooks.sol";
 import "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {Vm} from "forge-std/Vm.sol";
 
-contract TWAMMGovernanceTest is Test {
+contract TWAMMGovernanceTest is Test, Deployers {
     TWAMMGovernance public governance;
+    TWAMMImplementation public twammImpl;
+    address public twamm;
+    PoolKey public poolKey;
+    PoolId public poolId;    
     MockDAOToken public daoToken;
+    WrappedGovernanceToken public governanceToken;
+    MockERC20 public token0;
+    MockERC20 public token1;
+
     address public alice = address(0x1);
     address public bob = address(0x2);
     address public charlie = address(0x3);
 
-    TWAMM flags =
-        TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
     function setUp() public {
-        daoToken = new MockDAOToken();
-        governance = new TWAMMGovernance(
-            IPoolManager(address(0x123)),
-            10000,
-            IERC20(address(daoToken)),
-            Currency.wrap(address(0x1)),
-            Currency.wrap(address(0x2)),
-            3000,
-            60
+        // Initialize the manager and routers
+        deployFreshManagerAndRouters();
+        // 'manager' is initialized in 'Deployers' and accessible here
+
+        // Deploy currencies
+        (currency0, currency1) = deployMintAndApprove2Currencies();
+        token0 = MockERC20(Currency.unwrap(currency0));
+        token1 = MockERC20(Currency.unwrap(currency1));
+
+        // Set up the TWAMM hook
+        twamm = address(
+            uint160(
+                Hooks.BEFORE_INITIALIZE_FLAG |
+                Hooks.BEFORE_SWAP_FLAG |
+                Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            )
         );
-        
-        // Distribute tokens
-        daoToken.transfer(alice, 200000e18);
-        daoToken.transfer(bob, 200000e18);
-        daoToken.transfer(charlie, 200000e18);
+
+        // Deploy the TWAMMImplementation contract
+        twammImpl = new TWAMMImplementation(manager, 10000, TWAMM(twamm));
+
+        // Etch the code of the implementation into the twamm address
+        (, bytes32[] memory writes) = vm.accesses(address(twammImpl));
+        vm.etch(twamm, address(twammImpl).code);
+
+        // Copy storage values
+        unchecked {
+            for (uint256 i = 0; i < writes.length; i++) {
+                bytes32 slot = writes[i];
+                vm.store(twamm, slot, vm.load(address(twammImpl), slot));
+            }
+        }
+
+        // Initialize the pool with the TWAMM hook
+        (poolKey, poolId) = initPool(
+            currency0,
+            currency1,
+            IHooks(twamm),  // Cast twamm to IHooks
+            3000,
+            60,
+            1 << 96,
+            bytes("")
+        );
+        // Add liquidity to the pool
+        token0.mint(address(this), 100 ether);
+        token1.mint(address(this), 100 ether);
+        token0.approve(address(modifyLiquidityRouter), 100 ether);
+        token1.approve(address(modifyLiquidityRouter), 100 ether);
+        modifyLiquidityRouter.modifyLiquidity(
+            poolKey,
+            IPoolManager.ModifyLiquidityParams(-60, 60, 10 ether, 0),
+            bytes("")
+        );
+
+        // Deploy DAO token and governance token
+        daoToken = new MockDAOToken();
+        governanceToken = new WrappedGovernanceToken(IERC20(address(daoToken)));
+
+        // Deploy the governance contract using 'manager' and 'twamm'
+        governance = new TWAMMGovernance(
+    manager,
+    10000,
+    IERC20(address(daoToken)),
+    currency0,
+    currency1,
+    3000,
+    60,
+    twamm
+);
+
+
+        // Distribute tokens to test addresses
+        daoToken.mint(alice, 200000e18);
+        daoToken.mint(bob, 200000e18);
+        daoToken.mint(charlie, 200000e18);
 
         // Approve governance contract to spend tokens
         vm.prank(alice);
@@ -44,18 +121,18 @@ contract TWAMMGovernanceTest is Test {
 
     function testProposalCreationRequires1Percent() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
 
         vm.expectRevert("Insufficient tokens to propose");
         vm.prank(charlie);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
     }
 
     function testProposalLastsOneWeek() public {
         uint256 startTime = block.timestamp;
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
-        
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
+
         uint256 proposalId = governance.proposalCount() - 1;
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
 
@@ -65,52 +142,52 @@ contract TWAMMGovernanceTest is Test {
 
     function testVotingWithWrappedToken() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
 
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
-        assertEq(proposal.votes.forVotes, 1);
+        assertEq(proposal.votes.forVotes, 1e18);
     }
 
     function testTrackingYayAndNayVotes() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
         vm.prank(charlie);
-        governance.vote(proposalId, false);
+        governance.vote(proposalId, false, 1e18);
 
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
-        assertEq(proposal.votes.forVotes, 1);
-        assertEq(proposal.votes.againstVotes, 1);
+        assertEq(proposal.votes.forVotes, 1e18);
+        assertEq(proposal.votes.againstVotes, 1e18);
     }
 
     function testMinimum25PercentParticipation() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
 
         vm.warp(block.timestamp + 7 days + 1);
 
         vm.expectRevert("Insufficient participation");
         governance.executeProposal(proposalId);
 
-        // We need many more votes to reach 25% participation
-        for (uint i = 0; i < 250000; i++) {
+        // We need many more votes to reach minimum participation
+        for (uint256 i = 0; i < 50000; i++) {
             address voter = address(uint160(i + 1000));
-            daoToken.transfer(voter, 1e18);
+            daoToken.mint(voter, 1e18);
             vm.prank(voter);
             daoToken.approve(address(governance), 1e18);
             vm.prank(voter);
-            governance.vote(proposalId, true);
+            governance.vote(proposalId, true, 1e18);
         }
 
         governance.executeProposal(proposalId);
@@ -118,22 +195,22 @@ contract TWAMMGovernanceTest is Test {
 
     function testProposalDeniedWithMoreNays() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, false);
+        governance.vote(proposalId, false, 1e18);
         vm.prank(charlie);
-        governance.vote(proposalId, false);
+        governance.vote(proposalId, false, 1e18);
 
         // Add more votes to reach minimum participation
-        for (uint i = 0; i < 250000; i++) {
+        for (uint256 i = 0; i < 50000; i++) {
             address voter = address(uint160(i + 1000));
-            daoToken.transfer(voter, 1e18);
+            daoToken.mint(voter, 1e18);
             vm.prank(voter);
             daoToken.approve(address(governance), 1e18);
             vm.prank(voter);
-            governance.vote(proposalId, false);
+            governance.vote(proposalId, false, 1e18);
         }
 
         vm.warp(block.timestamp + 7 days + 1);
@@ -147,62 +224,82 @@ contract TWAMMGovernanceTest is Test {
 
     function testSuccessfulProposalUpdatesTWAMM() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         // Add votes to reach minimum participation and pass the proposal
-        for (uint i = 0; i < 250000; i++) {
+        for (uint256 i = 0; i < 50000; i++) {
             address voter = address(uint160(i + 1000));
-            daoToken.transfer(voter, 1e18);
+            daoToken.mint(voter, 1e18);
             vm.prank(voter);
             daoToken.approve(address(governance), 1e18);
             vm.prank(voter);
-            governance.vote(proposalId, true);
+            governance.vote(proposalId, true, 1e18);
         }
 
         vm.warp(block.timestamp + 7 days + 1);
+
+        // Mock the TWAMM contract to expect a call to submitOrder
+        bytes32 mockOrderId = bytes32(uint256(1));  // Example mock order ID
+        vm.mockCall(
+            address(twamm),
+            abi.encodeWithSelector(ITWAMM.submitOrder.selector),
+            abi.encode(mockOrderId)
+        );
 
         governance.executeProposal(proposalId);
 
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
         assertEq(proposal.executed, true);
-        // You should add a check here to ensure the TWAMM was actually updated
-        // This might involve mocking the TWAMM contract or checking state changes
+
+        // Verify that submitOrder was called on the TWAMM contract
+        vm.expectCall(
+            address(twamm),
+            abi.encodeWithSelector(ITWAMM.submitOrder.selector)
+        );
     }
 
     function testTokenLocking() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         uint256 bobBalanceBefore = daoToken.balanceOf(bob);
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
         uint256 bobBalanceAfter = daoToken.balanceOf(bob);
 
-        assertEq(bobBalanceBefore - bobBalanceAfter, 1, "One token should be locked");
-        assertEq(governance.lockedTokens(bob), 1, "One token should be recorded as locked");
+        assertEq(bobBalanceBefore - bobBalanceAfter, 1e18, "1e18 tokens should be locked");
+        assertEq(governance.lockedTokens(bob, proposalId), 1e18, "1e18 tokens should be recorded as locked");
     }
 
     function testTokenWithdrawal() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
 
         vm.warp(block.timestamp + 7 days + 1);
 
         // Add more votes to reach minimum participation
-        for (uint i = 0; i < 250000; i++) {
+        for (uint256 i = 0; i < 50000; i++) {
             address voter = address(uint160(i + 1000));
-            daoToken.transfer(voter, 1e18);
+            daoToken.mint(voter, 1e18);
             vm.prank(voter);
             daoToken.approve(address(governance), 1e18);
             vm.prank(voter);
-            governance.vote(proposalId, true);
+            governance.vote(proposalId, true, 1e18);
         }
+
+        // Mock the TWAMM contract to expect a call to submitOrder
+        bytes32 mockOrderId = bytes32(uint256(1));  // Example mock order ID
+        vm.mockCall(
+            address(twamm),
+            abi.encodeWithSelector(ITWAMM.submitOrder.selector),
+            abi.encode(mockOrderId)
+        );
 
         governance.executeProposal(proposalId);
 
@@ -211,17 +308,17 @@ contract TWAMMGovernanceTest is Test {
         governance.withdrawTokens(proposalId);
         uint256 bobBalanceAfter = daoToken.balanceOf(bob);
 
-        assertEq(bobBalanceAfter - bobBalanceBefore, 1, "One token should be withdrawn");
-        assertEq(governance.lockedTokens(bob), 0, "No tokens should remain locked");
+        assertEq(bobBalanceAfter - bobBalanceBefore, 1e18, "1e18 tokens should be withdrawn");
+        assertEq(governance.lockedTokens(bob, proposalId), 0, "No tokens should remain locked");
     }
 
     function testCannotWithdrawBeforeExecution() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
 
         vm.expectRevert("Proposal not yet executed");
         vm.prank(bob);
@@ -230,14 +327,14 @@ contract TWAMMGovernanceTest is Test {
 
     function testCannotVoteTwice() public {
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true);
+        governance.createProposal(100e18, 7 days, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
 
         vm.expectRevert("Already voted on this proposal");
         vm.prank(bob);
-        governance.vote(proposalId, true);
+        governance.vote(proposalId, true, 1e18);
     }
 }
