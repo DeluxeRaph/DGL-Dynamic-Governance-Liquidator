@@ -23,7 +23,7 @@ contract TWAMMGovernanceTest is Test, Deployers {
     TWAMMImplementation public twammImpl;
     address public twamm;
     PoolKey public poolKey;
-    PoolId public poolId;    
+    PoolId public poolId;
     MockDAOToken public daoToken;
     WrappedGovernanceToken public governanceToken;
     MockERC20 public token0;
@@ -45,13 +45,8 @@ contract TWAMMGovernanceTest is Test, Deployers {
         token1 = MockERC20(Currency.unwrap(currency1));
 
         // Set up the TWAMM hook
-        twamm = address(
-            uint160(
-                Hooks.BEFORE_INITIALIZE_FLAG |
-                Hooks.BEFORE_SWAP_FLAG |
-                Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-            )
-        );
+        twamm =
+            address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG));
 
         // Deploy the TWAMMImplementation contract
         twammImpl = new TWAMMImplementation(manager, 10000, TWAMM(twamm));
@@ -72,7 +67,7 @@ contract TWAMMGovernanceTest is Test, Deployers {
         (poolKey, poolId) = initPool(
             currency0,
             currency1,
-            IHooks(twamm),  // Cast twamm to IHooks
+            IHooks(twamm), // Cast twamm to IHooks
             3000,
             60,
             1 << 96,
@@ -84,9 +79,7 @@ contract TWAMMGovernanceTest is Test, Deployers {
         token0.approve(address(modifyLiquidityRouter), 100 ether);
         token1.approve(address(modifyLiquidityRouter), 100 ether);
         modifyLiquidityRouter.modifyLiquidity(
-            poolKey,
-            IPoolManager.ModifyLiquidityParams(-60, 60, 10 ether, 0),
-            bytes("")
+            poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, 10 ether, 0), bytes("")
         );
 
         // Deploy DAO token and governance token
@@ -94,17 +87,8 @@ contract TWAMMGovernanceTest is Test, Deployers {
         governanceToken = new WrappedGovernanceToken(IERC20(address(daoToken)));
 
         // Deploy the governance contract using 'manager' and 'twamm'
-        governance = new TWAMMGovernance(
-    manager,
-    10000,
-    IERC20(address(daoToken)),
-    currency0,
-    currency1,
-    3000,
-    60,
-    twamm
-);
-
+        governance =
+            new TWAMMGovernance(manager, 10000, IERC20(address(daoToken)), currency0, currency1, 3000, 60, twamm);
 
         // Distribute tokens to test addresses
         daoToken.mint(alice, 200000e18);
@@ -255,17 +239,12 @@ contract TWAMMGovernanceTest is Test, Deployers {
         governance.vote(proposalId, true, 150000e18);
         vm.prank(alice);
         governance.vote(proposalId, true, 150000e18);
-        
 
         vm.warp(block.timestamp + 7 days + 1);
 
         // Mock the TWAMM contract to expect a call to submitOrder
-        bytes32 mockOrderId = bytes32(uint256(1));  // Example mock order ID
-        vm.mockCall(
-            address(twamm),
-            abi.encodeWithSelector(ITWAMM.submitOrder.selector),
-            abi.encode(mockOrderId)
-        );
+        bytes32 mockOrderId = bytes32(uint256(1)); // Example mock order ID
+        vm.mockCall(address(twamm), abi.encodeWithSelector(ITWAMM.submitOrder.selector), abi.encode(mockOrderId));
 
         governance.executeProposal(proposalId);
 

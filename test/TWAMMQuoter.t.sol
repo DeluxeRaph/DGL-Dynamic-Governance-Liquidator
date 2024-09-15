@@ -59,7 +59,7 @@
 //     }
 
 //     function testCreateGovernanceProposal() public {
-        
+
 //         governanceToken.mint(address(this), 200 * 10**18); // mint to meet the proposal threshold
 
 //         governance.createProposal(initialProposalAmount, 7 days, zeroForOne);

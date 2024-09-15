@@ -9,6 +9,6 @@ contract MockDAOToken is ERC20 {
     }
 
     function mint(address to, uint256 amount) public virtual {
-    _mint(to, amount);
+        _mint(to, amount);
     }
 }

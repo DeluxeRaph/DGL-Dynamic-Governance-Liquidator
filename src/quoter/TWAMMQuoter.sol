@@ -28,10 +28,12 @@ contract TWAMMQuoter {
         poolKey = _poolKey;
     }
 
-    function quoteProposalExactInput(uint256 proposalId) public returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
+    function quoteProposalExactInput(uint256 proposalId)
+        public
+        returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After)
+    {
         TWAMMGovernance.Proposal memory proposal = governanceContract.getProposal(proposalId);
-        
-        
+
         uint160 MAX_SLIPPAGE = proposal.zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
 
         (deltaAmounts, sqrtPriceX96After,) = quoter.quoteExactInputSingle(
@@ -47,7 +49,10 @@ contract TWAMMQuoter {
         emit QuotedSwap(proposalId, deltaAmounts, sqrtPriceX96After);
     }
 
-    function quoteProposalExactOutput(uint256 proposalId) public returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
+    function quoteProposalExactOutput(uint256 proposalId)
+        public
+        returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After)
+    {
         TWAMMGovernance.Proposal memory proposal = governanceContract.getProposal(proposalId);
 
         uint160 MAX_SLIPPAGE = proposal.zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1;
@@ -65,7 +70,10 @@ contract TWAMMQuoter {
         emit QuotedSwap(proposalId, deltaAmounts, sqrtPriceX96After);
     }
 
-    function getQuoteForProposal(uint256 proposalId, bool exactInput) external returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) {
+    function getQuoteForProposal(uint256 proposalId, bool exactInput)
+        external
+        returns (int128[] memory deltaAmounts, uint160 sqrtPriceX96After)
+    {
         if (exactInput) {
             return quoteProposalExactInput(proposalId);
         } else {
