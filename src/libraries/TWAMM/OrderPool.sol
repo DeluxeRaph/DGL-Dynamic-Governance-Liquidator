@@ -16,6 +16,12 @@ library OrderPool {
         mapping(uint256 => uint256) earningsFactorAtInterval;
     }
 
+    // Define the Snapshot struct without mappings
+    struct Snapshot {
+        uint256 sellRateCurrent;
+        uint256 earningsFactorCurrent;
+    }
+
     // Performs all updates on an OrderPool that must happen when hitting an expiration interval with expiring orders
     function advanceToInterval(State storage self, uint256 expiration, uint256 earningsFactor) internal {
         unchecked {
@@ -30,5 +36,11 @@ library OrderPool {
         unchecked {
             self.earningsFactorCurrent += earningsFactor;
         }
+    }
+
+    // Simulation function for advancing to current time
+    function simulateAdvanceToCurrentTime(Snapshot memory self, uint256 earningsFactor) internal pure {
+        // Simulate the logic without modifying storage
+        self.earningsFactorCurrent = earningsFactor;
     }
 }

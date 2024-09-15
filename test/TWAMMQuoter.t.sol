@@ -1,147 +1,182 @@
-// // SPDX-License-Identifier: UNLICENSED
-// pragma solidity ^0.8.19;
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.26;
 
-// import "forge-std/Test.sol";
-// import "../src/TWAMM.sol";
-// import "../src/mocks/MockDaoToken.sol";
-// import "../src/governance/WrappedGovernanceToken.sol";
-// import {TWAMMGovernance} from "../src/governance/TWAMMGovernance.sol";
-// import {TWAMMQuoter} from "../src/quoter/TWAMMQuoter.sol";
-// import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-// import {IQuoter} from "v4-periphery/src/interfaces/IQuoter.sol";
-// import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-// import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-// import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
-// import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import "forge-std/Test.sol";
+import "forge-std/console.sol";
+import "../src/quoter/TWAMMQuoter.sol";
+import "../src/TWAMM.sol";
+import "../src/governance/TWAMMGovernance.sol";
+import "../src/mocks/MockERC20.sol";
+import "../src/implementation/TWAMMImplementation.sol";
+import "@uniswap/v4-core/src/libraries/Hooks.sol";
+import "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 
-// contract TWAMMQuoterTest is Test {
-//     IPoolManager poolManager;
-//     IQuoter quoter;
-//     TWAMMGovernance governance;
-//     WrappedGovernanceToken governanceToken;
-//     MockDAOToken public daoToken;
-//     TWAMMQuoter twammQuoter;
-//     TWAMM flags =
-//         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
+contract TWAMMQuoterTest is Test, Deployers {
+    using PoolIdLibrary for PoolKey;
 
-//     PoolKey poolKey;
-//     uint256 initialProposalAmount = 1e18;
-//     bool zeroForOne = true;
+    TWAMMQuoter public quoter;
+    TWAMMGovernance public governance;
+    TWAMMImplementation public twammImpl;
+    address public twamm;
+    PoolKey public poolKey;
+    PoolId public poolId;
+    MockERC20 public token0;
+    MockERC20 public token1;
+    MockERC20 public daoToken;
 
-//     function setUp() public {
-//         // Deploy mock contracts
-//         poolManager = IPoolManager(address(new MockPoolManager()));
-//         quoter = IQuoter(address(new MockQuoter()));
+    address public alice = address(0x1);
+    address public bob = address(0x2);
 
-//         // Create pool key
-//         poolKey = PoolKey({
-//             currency0: Currency.wrap(address(new MockERC20("Test Token 0", "T0", 18))),
-//             currency1: Currency.wrap(address(new MockERC20("Test Token 1", "T1", 18))),
-//             fee: 3000,
-//             tickSpacing: 60,
-//             hooks: flags
-//         });
+    function setUp() public {
+        // Initialize the manager and routers
+        deployFreshManagerAndRouters();
 
-//         // Deploy governance contract
-//         governance = new TWAMMGovernance(
-//     manager,
-//     expirationInterval,
-//     daoToken,
-//     currency0,
-//     currency1,
-//     fee,
-//     tickSpacing,
-//     twamm  // Add this missing argument
-// );
+        // Deploy currencies
+        (currency0, currency1) = deployMintAndApprove2Currencies();
+        token0 = MockERC20(Currency.unwrap(currency0));
+        token1 = MockERC20(Currency.unwrap(currency1));
 
-//         // Deploy TWAMMQuoter
-//         twammQuoter = new TWAMMQuoter(address(poolManager), address(governance), address(quoter), poolKey);
-//     }
+        // Set up the TWAMM hook
+        twamm = address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG));
 
-//     function testCreateGovernanceProposal() public {
+        // Deploy the TWAMMImplementation contract
+        twammImpl = new TWAMMImplementation(manager, 10000, TWAMM(twamm));
 
-//         governanceToken.mint(address(this), 200 * 10**18); // mint to meet the proposal threshold
+        // Etch the code of the implementation into the twamm address
+        (, bytes32[] memory writes) = vm.accesses(address(twammImpl));
+        vm.etch(twamm, address(twammImpl).code);
 
-//         governance.createProposal(initialProposalAmount, 7 days, zeroForOne);
+        // Copy storage values
+        unchecked {
+            for (uint256 i = 0; i < writes.length; i++) {
+                bytes32 slot = writes[i];
+                vm.store(twamm, slot, vm.load(address(twammImpl), slot));
+            }
+        }
 
-//         // Check proposal created
-//         TWAMMGovernance.Proposal memory proposal = governance.getProposal(0);
-//         assertEq(proposal.amount, initialProposalAmount, "Proposal not created correctly");
-//     }
+        // Initialize the pool with the TWAMM hook
+        (poolKey, poolId) = initPool(currency0, currency1, IHooks(twamm), 3000, 60, 1 << 96, bytes(""));
 
-//     function testQuoteProposalExactInput() public {
-//         // Create a proposal
-//         createSampleProposal();
+        // Add liquidity to the pool
+        token0.mint(address(this), 100 ether);
+        token1.mint(address(this), 100 ether);
+        token0.approve(address(modifyLiquidityRouter), 100 ether);
+        token1.approve(address(modifyLiquidityRouter), 100 ether);
+        modifyLiquidityRouter.modifyLiquidity(poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, 10 ether, 0), bytes(""));
 
-//         // Get quote for the created proposal
-//         (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) = twammQuoter.getQuoteForProposal(0, true);
+        // Deploy DAO token
+        daoToken = new MockERC20("DAO Token", "DAO", 18);
 
-//         // Log results for visual verification
-//         emit log_int(int256(deltaAmounts[1]));  // Expected output amount
-//         emit log_uint(sqrtPriceX96After);       // Expected price after swap
+        // Deploy the governance contract
+        governance = new TWAMMGovernance(manager, 10000, IERC20(address(daoToken)), currency0, currency1, 3000, 60, twamm);
 
-//         // Check if event emitted correctly
-//         vm.expectEmit(true, true, true, true);
-//         emit QuotedSwap(0, deltaAmounts, sqrtPriceX96After);
-//         twammQuoter.getQuoteForProposal(0, true);
-//     }
+        // Deploy the quoter contract
+        quoter = new TWAMMQuoter(address(manager), address(governance), twamm, poolKey);
 
-//     function testQuoteProposalExactOutput() public {
-//         // Create a proposal
-//         createSampleProposal();
+        // Distribute tokens to test addresses
+        daoToken.mint(alice, 200000e18);
+        daoToken.mint(bob, 200000e18);
 
-//         // Get quote for exact output of the created proposal
-//         (int128[] memory deltaAmounts, uint160 sqrtPriceX96After) = twammQuoter.getQuoteForProposal(0, false);
+        // Approve governance contract to spend tokens
+        vm.prank(alice);
+        daoToken.approve(address(governance), type(uint256).max);
+        vm.prank(bob);
+        daoToken.approve(address(governance), type(uint256).max);
+    }
 
-//         // Log results for visual verification
-//         emit log_int(int256(deltaAmounts[0]));  // Expected input amount
-//         emit log_uint(sqrtPriceX96After);       // Expected price after swap
+    function testQuoterSetup() public {
+        assertEq(address(quoter.poolManager()), address(manager), "Pool manager address mismatch");
+        assertEq(address(quoter.governanceContract()), address(governance), "Governance contract address mismatch");
+        assertEq(address(quoter.twamm()), twamm, "TWAMM address mismatch");
+        assertEq(Currency.unwrap(quoter.currency0()), Currency.unwrap(poolKey.currency0), "Currency0 mismatch");
+        assertEq(Currency.unwrap(quoter.currency1()), Currency.unwrap(poolKey.currency1), "Currency1 mismatch");
+        assertEq(quoter.fee(), poolKey.fee, "Fee mismatch");
+        assertEq(quoter.tickSpacing(), poolKey.tickSpacing, "Tick spacing mismatch");
+        assertEq(address(quoter.hooks()), address(poolKey.hooks), "Hooks address mismatch");
+    }
 
-//         // Check if event emitted correctly
-//         vm.expectEmit(true, true, true, true);
-//         emit QuotedSwap(0, deltaAmounts, sqrtPriceX96After);
-//         twammQuoter.getQuoteForProposal(0, false);
-//     }
+    function testQuoteProposal() public {
+    // Create a proposal
+    uint256 proposalAmount = 1 ether;
+    uint256 proposalDuration = TWAMM(twamm).expirationInterval();
+    vm.prank(alice);
+    governance.createProposal(proposalAmount, proposalDuration, true, "Test proposal");
+    uint256 proposalId = governance.proposalCount() - 1;
 
-//     function createSampleProposal() internal {
-//         governanceToken.mint(address(this), 200 * 10**18);  // Mint governance tokens for proposal creation
+    // Get quote for the proposal
+    (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) = quoter.getQuoteForProposal(proposalId);
 
-//         governance.createProposal(initialProposalAmount, 7 days, zeroForOne);
-//     }
+    // Log the values for debugging
+    console.log("amount0Delta:", amount0Delta);
+    console.log("amount1Delta:", amount1Delta);
+    console.log("sqrtPriceX96After:", sqrtPriceX96After);
 
-//     event QuotedSwap(uint256 indexed proposalId, int128[] deltaAmounts, uint160 sqrtPriceX96After);
-// }
+    // Check that the quote is not zero and within reasonable bounds
+    assertTrue(amount0Delta != 0 || amount1Delta != 0, "Quote should not be zero");
+    assertTrue(sqrtPriceX96After != 0, "SqrtPriceX96After should not be zero");
+    assertTrue(amount0Delta > -1e27 && amount0Delta < 1e27, "amount0Delta out of reasonable bounds");
+    assertTrue(amount1Delta > -1e27 && amount1Delta < 1e27, "amount1Delta out of reasonable bounds");
+}
 
-// // Mock contracts
-// contract MockPoolManager {
-//     function initialize(PoolKey memory, uint160, bytes memory) external {}
-// }
+    function testQuoteProposalWithNoLiquidity() public {
+        // Remove all liquidity from the pool
+        modifyLiquidityRouter.modifyLiquidity(poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, -10 ether, 0), bytes(""));
 
-// contract MockQuoter {
-//     function quoteExactInputSingle(IQuoter.QuoteExactSingleParams memory)
-//         external
-//         pure
-//         returns (int128[] memory, uint160, uint32)
-//     {
-//         int128[] memory deltaAmounts = new int128[](2);
-//         deltaAmounts[0] = -1e18;
-//         deltaAmounts[1] = 9e17;
-//         return (deltaAmounts, 1 << 96, 1);
-//     }
+        // Create a proposal
+        uint256 proposalAmount = 1 ether;
+        uint256 proposalDuration = TWAMM(twamm).expirationInterval();
+        vm.prank(alice);
+        governance.createProposal(proposalAmount, proposalDuration, true, "Test proposal");
+        uint256 proposalId = governance.proposalCount() - 1;
 
-//     function quoteExactOutputSingle(IQuoter.QuoteExactSingleParams memory)
-//         external
-//         pure
-//         returns (int128[] memory, uint160, uint32)
-//     {
-//         int128[] memory deltaAmounts = new int128[](2);
-//         deltaAmounts[0] = -11e17;
-//         deltaAmounts[1] = 1e18;
-//         return (deltaAmounts, 1 << 96, 1);
-//     }
-// }
+        // Attempt to get quote for the proposal
+        vm.expectRevert(); // Expect revert due to lack of liquidity
+        quoter.getQuoteForProposal(proposalId);
+    }
 
-// contract MockERC20 {
-//     constructor(string memory, string memory, uint8) {}
-//     function mint(address, uint256) public {}
-// }
+    function testQuoteMultipleProposals() public {
+    // Create multiple proposals
+    uint256 proposalAmount = 1 ether;
+    uint256 proposalDuration = TWAMM(twamm).expirationInterval();
+    vm.startPrank(alice);
+    governance.createProposal(proposalAmount, proposalDuration, true, "Proposal 1");
+    governance.createProposal(proposalAmount, proposalDuration, false, "Proposal 2");
+    vm.stopPrank();
+
+    uint256 proposalId1 = governance.proposalCount() - 2;
+    uint256 proposalId2 = governance.proposalCount() - 1;
+
+    // Get quotes for both proposals
+    (int256 amount0Delta1, int256 amount1Delta1, uint160 sqrtPriceX96After1) = quoter.getQuoteForProposal(proposalId1);
+    (int256 amount0Delta2, int256 amount1Delta2, uint160 sqrtPriceX96After2) = quoter.getQuoteForProposal(proposalId2);
+
+    // Log the values for debugging
+    console.log("Proposal 1 - amount0Delta:", amount0Delta1);
+    console.log("Proposal 1 - amount1Delta:", amount1Delta1);
+    console.log("Proposal 1 - sqrtPriceX96After:", sqrtPriceX96After1);
+    console.log("Proposal 2 - amount0Delta:", amount0Delta2);
+    console.log("Proposal 2 - amount1Delta:", amount1Delta2);
+    console.log("Proposal 2 - sqrtPriceX96After:", sqrtPriceX96After2);
+
+    // Check that the quotes are different and within reasonable bounds
+    assertTrue(amount0Delta1 != amount0Delta2 || amount1Delta1 != amount1Delta2, "Quotes should be different");
+    assertTrue(sqrtPriceX96After1 != sqrtPriceX96After2, "SqrtPriceX96After should be different");
+    assertTrue(amount0Delta1 > -1e27 && amount0Delta1 < 1e27, "amount0Delta1 out of reasonable bounds");
+    assertTrue(amount1Delta1 > -1e27 && amount1Delta1 < 1e27, "amount1Delta1 out of reasonable bounds");
+    assertTrue(amount0Delta2 > -1e27 && amount0Delta2 < 1e27, "amount0Delta2 out of reasonable bounds");
+    assertTrue(amount1Delta2 > -1e27 && amount1Delta2 < 1e27, "amount1Delta2 out of reasonable bounds");
+    }
+
+    function testQuoteNonExistentProposal() public {
+        uint256 nonExistentProposalId = 9999;
+
+        vm.expectRevert(); // Expect revert when quoting a non-existent proposal
+        quoter.getQuoteForProposal(nonExistentProposalId);
+    }
+}
