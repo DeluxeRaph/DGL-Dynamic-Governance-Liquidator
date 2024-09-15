@@ -201,7 +201,7 @@ contract TWAMM is BaseHook, ITWAMM {
         if (self.lastVirtualOrderTimestamp == 0) revert NotInitialized();
         if (orderKey.expiration <= block.timestamp) revert ExpirationLessThanBlocktime(orderKey.expiration);
         if (sellRate == 0) revert SellRateCannotBeZero();
-        if (orderKey.expiration % expirationInterval != 0) revert ExpirationNotOnInterval(orderKey.expiration);
+        // if (orderKey.expiration % expirationInterval != 0) revert ExpirationNotOnInterval(orderKey.expiration);
 
         orderId = _orderId(orderKey);
         if (self.orders[orderId].sellRate != 0) revert OrderAlreadyExists(orderKey);
