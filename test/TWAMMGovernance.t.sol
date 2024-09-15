@@ -107,19 +107,29 @@ contract TWAMMGovernanceTest is Test, Deployers {
         daoToken.approve(address(governance), type(uint256).max);
     }
 
+    // helper function to convert to valid proposal duration
+    function getValidProposalDuration() public view returns (uint256) {
+        uint256 twammInterval = ITWAMM(twamm).expirationInterval();
+        uint256 proposalDuration = 7 days;
+        // Ensure proposalDuration is a multiple of twammInterval
+        return proposalDuration - (proposalDuration % twammInterval) + twammInterval;
+    }
+
     function testProposalCreationRequires1Percent() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
 
         vm.expectRevert("Insufficient tokens to propose");
         vm.prank(ed);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
     }
 
     function testProposalLastsOneWeek() public {
+        uint256 validDuration = getValidProposalDuration();
         uint256 startTime = block.timestamp;
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
 
         uint256 proposalId = governance.proposalCount() - 1;
         TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
@@ -129,8 +139,9 @@ contract TWAMMGovernanceTest is Test, Deployers {
     }
 
     function testVotingWithWrappedToken() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
@@ -141,8 +152,9 @@ contract TWAMMGovernanceTest is Test, Deployers {
     }
 
     function testTrackingYayAndNayVotes() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
@@ -156,22 +168,24 @@ contract TWAMMGovernanceTest is Test, Deployers {
     }
 
     function testMinimum25PercentParticipation() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
         governance.vote(proposalId, true, 1e18);
 
-        vm.warp(block.timestamp + 7 days + 1);
+        vm.warp(block.timestamp + validDuration + 1);
 
         vm.expectRevert("Insufficient participation");
         governance.executeProposal(proposalId);
     }
 
     function testProposalDeniedWithMoreNays() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
@@ -179,7 +193,7 @@ contract TWAMMGovernanceTest is Test, Deployers {
         vm.prank(charlie);
         governance.vote(proposalId, false, 1e18);
 
-        vm.warp(block.timestamp + 7 days + 1);
+        vm.warp(block.timestamp + validDuration + 1);
 
         vm.expectRevert("Proposal denied");
         governance.executeProposal(proposalId);
@@ -188,35 +202,39 @@ contract TWAMMGovernanceTest is Test, Deployers {
         assertEq(proposal.executed, false);
     }
 
-    function testSuccessfulProposalUpdatesTWAMM() public {
-        vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
-        uint256 proposalId = governance.proposalCount() - 1;
+function testSuccessfulProposalUpdatesTWAMM() public {
+    uint256 validDuration = getValidProposalDuration();
+    uint256 totalSupply = daoToken.totalSupply();
+    uint256 requiredParticipation = (totalSupply * 25) / 100; // 25% of total supply
 
-        vm.prank(bob);
-        governance.vote(proposalId, true, 150000e18);
-        vm.prank(charlie);
-        governance.vote(proposalId, true, 150000e18);
-        vm.prank(alice);
-        governance.vote(proposalId, true, 150000e18);
+    vm.prank(alice);
+    governance.createProposal(100e18, validDuration, true, "Test proposal");
+    uint256 proposalId = governance.proposalCount() - 1;
 
-        vm.warp(block.timestamp + 7 days + 1);
+    // Vote with enough tokens to meet the participation threshold
+    vm.prank(alice);
+    governance.vote(proposalId, true, requiredParticipation / 3);
+    vm.prank(bob);
+    governance.vote(proposalId, true, requiredParticipation / 3);
+    vm.prank(charlie);
+    governance.vote(proposalId, true, requiredParticipation / 3);
 
-        governance.executeProposal(proposalId);
+    vm.warp(block.timestamp + validDuration + 1);
 
-        // TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
-        // assertEq(proposal.executed, true);
+    // Mock the TWAMM contract to expect a call to submitOrder
+    bytes32 mockOrderId = bytes32(uint256(1));
+    vm.mockCall(address(twamm), abi.encodeWithSelector(ITWAMM.submitOrder.selector), abi.encode(mockOrderId));
 
-        // // Verify that submitOrder was called on the TWAMM contract
-        // vm.expectCall(
-        //     address(twamm),
-        //     abi.encodeWithSelector(ITWAMM.submitOrder.selector)
-        // );
-    }
+    governance.executeProposal(proposalId);
+
+    TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
+    assertEq(proposal.executed, true, "Proposal should be marked as executed");
+}
 
     function testTokenLocking() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         uint256 bobBalanceBefore = daoToken.balanceOf(bob);
@@ -229,8 +247,9 @@ contract TWAMMGovernanceTest is Test, Deployers {
     }
 
     function testTokenWithdrawal() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
@@ -240,7 +259,7 @@ contract TWAMMGovernanceTest is Test, Deployers {
         vm.prank(alice);
         governance.vote(proposalId, true, 150000e18);
 
-        vm.warp(block.timestamp + 7 days + 1);
+        vm.warp(block.timestamp + validDuration + 1);
 
         // Mock the TWAMM contract to expect a call to submitOrder
         bytes32 mockOrderId = bytes32(uint256(1)); // Example mock order ID
@@ -258,8 +277,9 @@ contract TWAMMGovernanceTest is Test, Deployers {
     }
 
     function testCannotWithdrawBeforeExecution() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);
@@ -271,8 +291,9 @@ contract TWAMMGovernanceTest is Test, Deployers {
     }
 
     function testCannotVoteTwice() public {
+        uint256 validDuration = getValidProposalDuration();
         vm.prank(alice);
-        governance.createProposal(100e18, 7 days, true, "Test proposal");
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
         uint256 proposalId = governance.proposalCount() - 1;
 
         vm.prank(bob);

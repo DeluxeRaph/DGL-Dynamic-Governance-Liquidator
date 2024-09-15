@@ -20,6 +20,8 @@ contract TWAMMGovernance {
     uint256 public constant MIN_PARTICIPATION_PERCENTAGE = 25; // 25% of total supply
     uint256 public constant MAX_DURATION = 365 days; // Maximum duration for a proposal
 
+    uint256 public immutable twammExpirationInterval;
+
     // Declare immutable variables
     Currency public immutable token0;
     Currency public immutable token1;
@@ -29,6 +31,7 @@ contract TWAMMGovernance {
     uint256 public immutable expirationInterval;
     //TWAMM public immutable twamm;
     address public immutable twamm;
+    
 
     struct Proposal {
         uint256 id;
@@ -40,7 +43,7 @@ contract TWAMMGovernance {
         uint256 endTime;
         bool executed;
         Vote votes;
-        string description; // Assume this is the new field added
+        string description; 
     }
 
     struct Vote {
@@ -74,7 +77,7 @@ contract TWAMMGovernance {
         expirationInterval = _expirationInterval;
         daoToken = _daoToken;
         governanceToken = new WrappedGovernanceToken(_daoToken);
-
+        twammExpirationInterval = ITWAMM(_twamm).expirationInterval();
         token0 = _token0;
         token1 = _token1;
         fee = _fee;
@@ -100,6 +103,7 @@ contract TWAMMGovernance {
 
         uint256 sellRate = amount / duration;
         require(sellRate > 0, "Sell rate too low");
+        require(duration % twammExpirationInterval == 0, "Duration must be multiple of TWAMM interval");
 
         uint256 proposalId = proposalCount;
         proposalCount++;
@@ -114,7 +118,7 @@ contract TWAMMGovernance {
             endTime: block.timestamp + VOTING_PERIOD,
             executed: false,
             votes: Vote(0, 0),
-            description: proposalDescription // Provide the description
+            description: proposalDescription 
         });
 
         emit ProposalCreated(proposalId, msg.sender, amount, duration, zeroForOne);
@@ -153,18 +157,25 @@ contract TWAMMGovernance {
             "Insufficient participation"
         );
 
+        // Calculate the expiration time
+        uint256 expiration = block.timestamp + proposal.duration;
+        // Ensure it's on the correct interval
+        expiration = expiration - (expiration % twammExpirationInterval);
+
+
         proposal.executed = true;
+        
 
         // Create the PoolKey
-        PoolKey memory key =
-            PoolKey({currency0: token0, currency1: token1, fee: fee, tickSpacing: tickSpacing, hooks: IHooks(twamm)});
+        // PoolKey memory key =
+        //     PoolKey({currency0: token0, currency1: token1, fee: fee, tickSpacing: tickSpacing, hooks: IHooks(twamm)});
 
-        // Create the OrderKey
-        ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey({
-            owner: address(this),
-            expiration: uint160(block.timestamp + proposal.duration),
-            zeroForOne: proposal.zeroForOne
-        });
+        // // Create the OrderKey
+        // ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey({
+        //     owner: address(this),
+        //     expiration: uint160(expiration),
+        //     zeroForOne: proposal.zeroForOne
+        // });
 
         // Approve TWAMM to spend tokens
         IERC20(proposal.zeroForOne ? Currency.unwrap(token0) : Currency.unwrap(token1)).approve(
@@ -172,7 +183,7 @@ contract TWAMMGovernance {
         );
 
         // Call submitOrder on TWAMM
-        bytes32 orderId = ITWAMM(twamm).submitOrder(key, orderKey, proposal.amount);
+        //bytes32 orderId = ITWAMM(twamm).submitOrder(key, orderKey, proposal.amount);
 
         emit ProposalExecuted(proposalId);
         // You might want to emit the orderId as well
