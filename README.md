@@ -1,5 +1,9 @@
 # DGL: Dynamic Governance Liquidator
 
+### Authers
+Raphael Nembhard: Github - DeluxeRaph
+Benjamin Scheinberg: Github - theSchein
+
 ## Introduction
 
 DGL (Dynamic Governance Liquidator) is a comprehensive solution tailored for DAOs to manage their governance tokens more effectively and transparently. Built atop the Uniswap v4 protocol, DGL integrates the Time-Weighted Average Market Maker (**TWAMM**), allowing DAOs to dynamically buy or sell governance tokens over extended periods to minimize market impact and mitigate frontrunning risks. Furthermore, DGL embeds governance-specific logic, enabling the liquidation process to be governed by the DAO's voting and participation mechanisms.
@@ -65,7 +69,8 @@ The contract architecture is composed of the following modules:
 
 4. **Settlement and Yield**:
    - Once the trade completes, tokens are either distributed back to participants or used to fulfill the proposal's objective (e.g., selling for treasury management or liquidity provisioning).
-   - Locked tokens may also be paired with assets like ETH or USDC in a Uniswap liquidity pool to earn fees during the voting and execution process.
+   - Locked tokens may also be paired with assets like ETH or USDC in a Uniswap liquidity pool.
+   - Redistribution fee of swaps to voter's
 
 ## Usage
 
