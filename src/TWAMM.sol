@@ -25,7 +25,6 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 
-
 contract TWAMM is BaseHook, ITWAMM {
     using TransferHelper for IERC20Minimal;
     using CurrencyLibrary for Currency;
@@ -71,8 +70,6 @@ contract TWAMM is BaseHook, ITWAMM {
     constructor(IPoolManager _manager, uint256 _expirationInterval) BaseHook(_manager) {
         expirationInterval = _expirationInterval;
     }
-
-    
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
@@ -694,257 +691,194 @@ contract TWAMM is BaseHook, ITWAMM {
         emit TransferOrderOwnership(poolId, orderKey.owner, newOwner, orderKey.expiration, orderKey.zeroForOne);
     }
 
- function quoteSwap(
-    PoolKey calldata key,
-    int256 amountSpecified,
-    bool zeroForOne,
-    uint160 sqrtPriceLimitX96
-) external view returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) {
-    State storage twamm = twammStates[key.toId()];
-    
-    // Simulate executing TWAMM orders up to the current block
-    uint160 simulatedSqrtPriceX96 = _simulateExecuteTWAMMOrders(twamm, key);
+    function quoteSwap(PoolKey calldata key, int256 amountSpecified, bool zeroForOne, uint160 sqrtPriceLimitX96)
+        external
+        view
+        returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After)
+    {
+        State storage twamm = twammStates[key.toId()];
 
-    // If there were pending TWAMM orders that would affect the price, use the simulated price
-    if (simulatedSqrtPriceX96 != 0) {
-        (amount0Delta, amount1Delta, sqrtPriceX96After) = _simulateSwap(
-            twamm,
-            key,
-            zeroForOne,
-            amountSpecified,
-            sqrtPriceLimitX96,
-            simulatedSqrtPriceX96
-        );
-    } else {
-        // If no pending TWAMM orders, use the current pool price
+        // Simulate executing TWAMM orders up to the current block
+        uint160 simulatedSqrtPriceX96 = _simulateExecuteTWAMMOrders(twamm, key);
+
+        // If there were pending TWAMM orders that would affect the price, use the simulated price
+        if (simulatedSqrtPriceX96 != 0) {
+            (amount0Delta, amount1Delta, sqrtPriceX96After) =
+                _simulateSwap(twamm, key, zeroForOne, amountSpecified, sqrtPriceLimitX96, simulatedSqrtPriceX96);
+        } else {
+            // If no pending TWAMM orders, use the current pool price
+            (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+            (amount0Delta, amount1Delta, sqrtPriceX96After) =
+                _simulateSwap(twamm, key, zeroForOne, amountSpecified, sqrtPriceLimitX96, sqrtPriceX96);
+        }
+    }
+
+    function _simulateExecuteTWAMMOrders(State storage twamm, PoolKey memory key)
+        private
+        view
+        returns (uint160 newSqrtPriceX96)
+    {
+        if (!_hasOutstandingOrders(twamm)) {
+            return 0;
+        }
+
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-        (amount0Delta, amount1Delta, sqrtPriceX96After) = _simulateSwap(
-            twamm,
-            key,
-            zeroForOne,
-            amountSpecified,
-            sqrtPriceLimitX96,
-            sqrtPriceX96
+        uint128 liquidity = poolManager.getLiquidity(key.toId());
+
+        PoolParamsOnExecute memory pool = PoolParamsOnExecute({sqrtPriceX96: sqrtPriceX96, liquidity: liquidity});
+
+        // Simulate TWAMM order execution
+        (, newSqrtPriceX96) = _simulateTWAMMOrders(twamm, key, pool);
+
+        return newSqrtPriceX96;
+    }
+
+    function _simulateTWAMMOrders(State storage self, PoolKey memory key, PoolParamsOnExecute memory pool)
+        private
+        view
+        returns (bool zeroForOne, uint160 newSqrtPriceX96)
+    {
+        if (!_hasOutstandingOrders(self)) {
+            return (false, pool.sqrtPriceX96);
+        }
+
+        uint256 prevTimestamp = self.lastVirtualOrderTimestamp;
+        uint256 currentTimestamp = block.timestamp;
+
+        // Create snapshots of the order pools
+        OrderPool.Snapshot memory orderPool0For1 = OrderPool.Snapshot({
+            sellRateCurrent: self.orderPool0For1.sellRateCurrent,
+            earningsFactorCurrent: self.orderPool0For1.earningsFactorCurrent
+        });
+
+        OrderPool.Snapshot memory orderPool1For0 = OrderPool.Snapshot({
+            sellRateCurrent: self.orderPool1For0.sellRateCurrent,
+            earningsFactorCurrent: self.orderPool1For0.earningsFactorCurrent
+        });
+
+        PoolParamsOnExecute memory simulatedPool = pool;
+
+        // Simulate order execution over time
+        uint256 timeElapsed = currentTimestamp - prevTimestamp;
+        uint256 secondsElapsedX96 = timeElapsed * FixedPoint96.Q96;
+
+        // Simulate the TWAMM order execution logic
+        TwammMath.ExecutionUpdateParams memory executionParams = TwammMath.ExecutionUpdateParams(
+            secondsElapsedX96,
+            simulatedPool.sqrtPriceX96,
+            simulatedPool.liquidity,
+            orderPool0For1.sellRateCurrent,
+            orderPool1For0.sellRateCurrent
         );
-    }
-}
 
-function _simulateExecuteTWAMMOrders(State storage twamm, PoolKey memory key)
-    private
-    view
-    returns (uint160 newSqrtPriceX96)
-{
-    if (!_hasOutstandingOrders(twamm)) {
-        return 0;
-    }
+        uint160 finalSqrtPriceX96 = TwammMath.getNewSqrtPriceX96(executionParams);
 
-    (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-    uint128 liquidity = poolManager.getLiquidity(key.toId());
+        // Update earnings factors (in memory)
+        (uint256 earningsFactorPool0, uint256 earningsFactorPool1) =
+            TwammMath.calculateEarningsUpdates(executionParams, finalSqrtPriceX96);
 
-    PoolParamsOnExecute memory pool = PoolParamsOnExecute({
-        sqrtPriceX96: sqrtPriceX96,
-        liquidity: liquidity
-    });
+        // Use simulation functions
+        OrderPool.simulateAdvanceToCurrentTime(orderPool0For1, earningsFactorPool0);
+        OrderPool.simulateAdvanceToCurrentTime(orderPool1For0, earningsFactorPool1);
 
-    // Simulate TWAMM order execution
-    (, newSqrtPriceX96) = _simulateTWAMMOrders(
-        twamm,
-        key,
-        pool
-    );
+        // Update pool parameters
+        simulatedPool.sqrtPriceX96 = finalSqrtPriceX96;
 
-    return newSqrtPriceX96;
-}
-
-function _simulateTWAMMOrders(
-    State storage self,
-    PoolKey memory key,
-    PoolParamsOnExecute memory pool
-) private view returns (bool zeroForOne, uint160 newSqrtPriceX96) {
-    if (!_hasOutstandingOrders(self)) {
-        return (false, pool.sqrtPriceX96);
+        zeroForOne = pool.sqrtPriceX96 > simulatedPool.sqrtPriceX96;
+        newSqrtPriceX96 = simulatedPool.sqrtPriceX96;
     }
 
-    uint256 prevTimestamp = self.lastVirtualOrderTimestamp;
-    uint256 currentTimestamp = block.timestamp;
+    function _simulateSwap(
+        State storage self,
+        PoolKey memory key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        uint160 currentSqrtPriceX96
+    ) private view returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) {
+        uint128 liquidity = poolManager.getLiquidity(key.toId());
 
-    // Create snapshots of the order pools
-    OrderPool.Snapshot memory orderPool0For1 = OrderPool.Snapshot({
-        sellRateCurrent: self.orderPool0For1.sellRateCurrent,
-        earningsFactorCurrent: self.orderPool0For1.earningsFactorCurrent
-    });
+        int256 remainingAmountSpecified = amountSpecified;
+        uint160 sqrtPriceX96 = currentSqrtPriceX96;
 
-    OrderPool.Snapshot memory orderPool1For0 = OrderPool.Snapshot({
-        sellRateCurrent: self.orderPool1For0.sellRateCurrent,
-        earningsFactorCurrent: self.orderPool1For0.earningsFactorCurrent
-    });
+        uint24 fee = key.fee;
 
-    PoolParamsOnExecute memory simulatedPool = pool;
+        while (remainingAmountSpecified > 0 && sqrtPriceX96 != sqrtPriceLimitX96) {
+            uint160 nextSqrtPriceX96;
+            uint256 amountIn;
+            uint256 amountOut;
+            uint256 feeAmount;
 
-    // Simulate order execution over time
-    uint256 timeElapsed = currentTimestamp - prevTimestamp;
-    uint256 secondsElapsedX96 = timeElapsed * FixedPoint96.Q96;
+            uint256 amountSpecifiedUint = uint256(remainingAmountSpecified);
 
-    // Simulate the TWAMM order execution logic
-    TwammMath.ExecutionUpdateParams memory executionParams = TwammMath.ExecutionUpdateParams(
-        secondsElapsedX96,
-        simulatedPool.sqrtPriceX96,
-        simulatedPool.liquidity,
-        orderPool0For1.sellRateCurrent,
-        orderPool1For0.sellRateCurrent
-    );
-
-    uint160 finalSqrtPriceX96 = TwammMath.getNewSqrtPriceX96(executionParams);
-
-    // Update earnings factors (in memory)
-    (uint256 earningsFactorPool0, uint256 earningsFactorPool1) =
-        TwammMath.calculateEarningsUpdates(executionParams, finalSqrtPriceX96);
-
-    // Use simulation functions
-    OrderPool.simulateAdvanceToCurrentTime(orderPool0For1, earningsFactorPool0);
-    OrderPool.simulateAdvanceToCurrentTime(orderPool1For0, earningsFactorPool1);
-
-    // Update pool parameters
-    simulatedPool.sqrtPriceX96 = finalSqrtPriceX96;
-
-    zeroForOne = pool.sqrtPriceX96 > simulatedPool.sqrtPriceX96;
-    newSqrtPriceX96 = simulatedPool.sqrtPriceX96;
-}
-
-function _simulateSwap(
-    State storage self,
-    PoolKey memory key,
-    bool zeroForOne,
-    int256 amountSpecified,
-    uint160 sqrtPriceLimitX96,
-    uint160 currentSqrtPriceX96
-) private view returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) {
-    uint128 liquidity = poolManager.getLiquidity(key.toId());
-
-    int256 remainingAmountSpecified = amountSpecified;
-    uint160 sqrtPriceX96 = currentSqrtPriceX96;
-
-    uint24 fee = key.fee;
-
-    while (remainingAmountSpecified > 0 && sqrtPriceX96 != sqrtPriceLimitX96) {
-        uint160 nextSqrtPriceX96;
-        uint256 amountIn;
-        uint256 amountOut;
-        uint256 feeAmount;
-
-        uint256 amountSpecifiedUint = uint256(remainingAmountSpecified);
-
-        if (zeroForOne) {
-            // Reuse variables to reduce stack usage
-            {
-                uint160 sqrtPriceNext = SqrtPriceMath.getNextSqrtPriceFromInput(
-                    sqrtPriceX96,
-                    liquidity,
-                    amountSpecifiedUint,
-                    true
-                );
-
-                amountIn = SqrtPriceMath.getAmount0Delta(
-                    sqrtPriceX96,
-                    sqrtPriceNext,
-                    liquidity,
-                    true
-                );
-
-                amountOut = SqrtPriceMath.getAmount1Delta(
-                    sqrtPriceX96,
-                    sqrtPriceNext,
-                    liquidity,
-                    false
-                );
-
-                nextSqrtPriceX96 = sqrtPriceNext;
-            }
-        } else {
-            // Reuse variables to reduce stack usage
-            {
-                uint160 sqrtPriceNext = SqrtPriceMath.getNextSqrtPriceFromInput(
-                    sqrtPriceX96,
-                    liquidity,
-                    amountSpecifiedUint,
-                    false
-                );
-
-                amountIn = SqrtPriceMath.getAmount1Delta(
-                    sqrtPriceX96,
-                    sqrtPriceNext,
-                    liquidity,
-                    true
-                );
-
-                amountOut = SqrtPriceMath.getAmount0Delta(
-                    sqrtPriceX96,
-                    sqrtPriceNext,
-                    liquidity,
-                    false
-                );
-
-                nextSqrtPriceX96 = sqrtPriceNext;
-            }
-        }
-
-        // Include fee
-        feeAmount = (amountIn * fee) / 1_000_000; // Assuming fee is in hundredths of a basis point
-
-        amountIn += feeAmount;
-
-        if (amountIn > amountSpecifiedUint) {
-            amountIn = amountSpecifiedUint;
-
-            // Recalculate nextSqrtPriceX96 based on adjusted amountIn
             if (zeroForOne) {
-                nextSqrtPriceX96 = SqrtPriceMath.getNextSqrtPriceFromInput(
-                    sqrtPriceX96,
-                    liquidity,
-                    amountIn - feeAmount, // Subtract fee to get the net amountIn
-                    true
-                );
-                amountOut = SqrtPriceMath.getAmount1Delta(
-                    sqrtPriceX96,
-                    nextSqrtPriceX96,
-                    liquidity,
-                    false
-                );
+                // Reuse variables to reduce stack usage
+                {
+                    uint160 sqrtPriceNext =
+                        SqrtPriceMath.getNextSqrtPriceFromInput(sqrtPriceX96, liquidity, amountSpecifiedUint, true);
+
+                    amountIn = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtPriceNext, liquidity, true);
+
+                    amountOut = SqrtPriceMath.getAmount1Delta(sqrtPriceX96, sqrtPriceNext, liquidity, false);
+
+                    nextSqrtPriceX96 = sqrtPriceNext;
+                }
             } else {
-                nextSqrtPriceX96 = SqrtPriceMath.getNextSqrtPriceFromInput(
-                    sqrtPriceX96,
-                    liquidity,
-                    amountIn - feeAmount,
-                    false
-                );
-                amountOut = SqrtPriceMath.getAmount0Delta(
-                    sqrtPriceX96,
-                    nextSqrtPriceX96,
-                    liquidity,
-                    false
-                );
+                // Reuse variables to reduce stack usage
+                {
+                    uint160 sqrtPriceNext =
+                        SqrtPriceMath.getNextSqrtPriceFromInput(sqrtPriceX96, liquidity, amountSpecifiedUint, false);
+
+                    amountIn = SqrtPriceMath.getAmount1Delta(sqrtPriceX96, sqrtPriceNext, liquidity, true);
+
+                    amountOut = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtPriceNext, liquidity, false);
+
+                    nextSqrtPriceX96 = sqrtPriceNext;
+                }
             }
-            remainingAmountSpecified = 0;
-        } else {
-            remainingAmountSpecified -= int256(amountIn);
+
+            // Include fee
+            feeAmount = (amountIn * fee) / 1_000_000; // Assuming fee is in hundredths of a basis point
+
+            amountIn += feeAmount;
+
+            if (amountIn > amountSpecifiedUint) {
+                amountIn = amountSpecifiedUint;
+
+                // Recalculate nextSqrtPriceX96 based on adjusted amountIn
+                if (zeroForOne) {
+                    nextSqrtPriceX96 = SqrtPriceMath.getNextSqrtPriceFromInput(
+                        sqrtPriceX96,
+                        liquidity,
+                        amountIn - feeAmount, // Subtract fee to get the net amountIn
+                        true
+                    );
+                    amountOut = SqrtPriceMath.getAmount1Delta(sqrtPriceX96, nextSqrtPriceX96, liquidity, false);
+                } else {
+                    nextSqrtPriceX96 =
+                        SqrtPriceMath.getNextSqrtPriceFromInput(sqrtPriceX96, liquidity, amountIn - feeAmount, false);
+                    amountOut = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, nextSqrtPriceX96, liquidity, false);
+                }
+                remainingAmountSpecified = 0;
+            } else {
+                remainingAmountSpecified -= int256(amountIn);
+            }
+
+            sqrtPriceX96 = nextSqrtPriceX96;
+
+            if (zeroForOne) {
+                amount0Delta -= int256(amountIn);
+                amount1Delta += int256(amountOut);
+            } else {
+                amount1Delta -= int256(amountIn);
+                amount0Delta += int256(amountOut);
+            }
+
+            if (sqrtPriceX96 == sqrtPriceLimitX96) {
+                break;
+            }
         }
 
-        sqrtPriceX96 = nextSqrtPriceX96;
-
-        if (zeroForOne) {
-            amount0Delta -= int256(amountIn);
-            amount1Delta += int256(amountOut);
-        } else {
-            amount1Delta -= int256(amountIn);
-            amount0Delta += int256(amountOut);
-        }
-
-        if (sqrtPriceX96 == sqrtPriceLimitX96) {
-            break;
-        }
+        sqrtPriceX96After = sqrtPriceX96;
     }
-
-    sqrtPriceX96After = sqrtPriceX96;
-}
-
 }

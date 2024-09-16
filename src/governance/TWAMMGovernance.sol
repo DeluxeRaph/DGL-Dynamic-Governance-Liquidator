@@ -23,14 +23,13 @@ contract TWAMMGovernance {
     uint256 public immutable twammExpirationInterval;
 
     // Declare immutable variables
-    Currency public immutable token0; 
+    Currency public immutable token0;
     Currency public immutable token1;
     uint24 public immutable fee;
     int24 public immutable tickSpacing;
     IPoolManager public immutable manager;
     uint256 public immutable expirationInterval;
     address public immutable twamm;
-    
 
     struct Proposal {
         uint256 id;
@@ -42,7 +41,7 @@ contract TWAMMGovernance {
         uint256 endTime;
         bool executed;
         Vote votes;
-        string description; 
+        string description;
     }
 
     struct Vote {
@@ -70,7 +69,7 @@ contract TWAMMGovernance {
         Currency _token1,
         uint24 _fee,
         int24 _tickSpacing,
-        address _twamm 
+        address _twamm
     ) {
         manager = _manager;
         expirationInterval = _expirationInterval;
@@ -84,12 +83,9 @@ contract TWAMMGovernance {
         twamm = _twamm;
     }
 
-    function createProposal(
-        uint256 amount,
-        uint256 duration,
-        bool zeroForOne,
-        string memory proposalDescription
-    ) external {
+    function createProposal(uint256 amount, uint256 duration, bool zeroForOne, string memory proposalDescription)
+        external
+    {
         uint256 totalSupply = daoToken.totalSupply();
         uint256 proposerBalance = daoToken.balanceOf(msg.sender);
 
@@ -117,7 +113,7 @@ contract TWAMMGovernance {
             endTime: block.timestamp + VOTING_PERIOD,
             executed: false,
             votes: Vote(0, 0),
-            description: proposalDescription 
+            description: proposalDescription
         });
 
         emit ProposalCreated(proposalId, msg.sender, amount, duration, zeroForOne);
@@ -162,7 +158,7 @@ contract TWAMMGovernance {
         expiration = expiration - (expiration % twammExpirationInterval);
 
         proposal.executed = true;
-        
+
         // Approve TWAMM to spend tokens
         IERC20(proposal.zeroForOne ? Currency.unwrap(token0) : Currency.unwrap(token1)).approve(
             address(twamm), proposal.amount

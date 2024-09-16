@@ -142,10 +142,8 @@ interface ITWAMM {
     /// @return amount0Delta The delta of token0
     /// @return amount1Delta The delta of token1
     /// @return sqrtPriceX96After The sqrt price after the swap
-    function quoteSwap(
-        PoolKey calldata key,
-        int256 amountSpecified,
-        bool zeroForOne,
-        uint160 sqrtPriceLimitX96
-    ) external view returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After);
+    function quoteSwap(PoolKey calldata key, int256 amountSpecified, bool zeroForOne, uint160 sqrtPriceLimitX96)
+        external
+        view
+        returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After);
 }

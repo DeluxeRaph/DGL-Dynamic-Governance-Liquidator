@@ -202,34 +202,34 @@ contract TWAMMGovernanceTest is Test, Deployers {
         assertEq(proposal.executed, false);
     }
 
-function testSuccessfulProposalUpdatesTWAMM() public {
-    uint256 validDuration = getValidProposalDuration();
-    uint256 totalSupply = daoToken.totalSupply();
-    uint256 requiredParticipation = (totalSupply * 25) / 100; // 25% of total supply
+    function testSuccessfulProposalUpdatesTWAMM() public {
+        uint256 validDuration = getValidProposalDuration();
+        uint256 totalSupply = daoToken.totalSupply();
+        uint256 requiredParticipation = (totalSupply * 25) / 100; // 25% of total supply
 
-    vm.prank(alice);
-    governance.createProposal(100e18, validDuration, true, "Test proposal");
-    uint256 proposalId = governance.proposalCount() - 1;
+        vm.prank(alice);
+        governance.createProposal(100e18, validDuration, true, "Test proposal");
+        uint256 proposalId = governance.proposalCount() - 1;
 
-    // Vote with enough tokens to meet the participation threshold
-    vm.prank(alice);
-    governance.vote(proposalId, true, requiredParticipation / 3);
-    vm.prank(bob);
-    governance.vote(proposalId, true, requiredParticipation / 3);
-    vm.prank(charlie);
-    governance.vote(proposalId, true, requiredParticipation / 3);
+        // Vote with enough tokens to meet the participation threshold
+        vm.prank(alice);
+        governance.vote(proposalId, true, requiredParticipation / 3);
+        vm.prank(bob);
+        governance.vote(proposalId, true, requiredParticipation / 3);
+        vm.prank(charlie);
+        governance.vote(proposalId, true, requiredParticipation / 3);
 
-    vm.warp(block.timestamp + validDuration + 1);
+        vm.warp(block.timestamp + validDuration + 1);
 
-    // Mock the TWAMM contract to expect a call to submitOrder
-    bytes32 mockOrderId = bytes32(uint256(1));
-    vm.mockCall(address(twamm), abi.encodeWithSelector(ITWAMM.submitOrder.selector), abi.encode(mockOrderId));
+        // Mock the TWAMM contract to expect a call to submitOrder
+        bytes32 mockOrderId = bytes32(uint256(1));
+        vm.mockCall(address(twamm), abi.encodeWithSelector(ITWAMM.submitOrder.selector), abi.encode(mockOrderId));
 
-    governance.executeProposal(proposalId);
+        governance.executeProposal(proposalId);
 
-    TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
-    assertEq(proposal.executed, true, "Proposal should be marked as executed");
-}
+        TWAMMGovernance.Proposal memory proposal = governance.getProposal(proposalId);
+        assertEq(proposal.executed, true, "Proposal should be marked as executed");
+    }
 
     function testTokenLocking() public {
         uint256 validDuration = getValidProposalDuration();

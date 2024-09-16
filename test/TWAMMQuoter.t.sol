@@ -43,7 +43,8 @@ contract TWAMMQuoterTest is Test, Deployers {
         token1 = MockERC20(Currency.unwrap(currency1));
 
         // Set up the TWAMM hook
-        twamm = address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG));
+        twamm =
+            address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG));
 
         // Deploy the TWAMMImplementation contract
         twammImpl = new TWAMMImplementation(manager, 10000, TWAMM(twamm));
@@ -68,13 +69,16 @@ contract TWAMMQuoterTest is Test, Deployers {
         token1.mint(address(this), 100 ether);
         token0.approve(address(modifyLiquidityRouter), 100 ether);
         token1.approve(address(modifyLiquidityRouter), 100 ether);
-        modifyLiquidityRouter.modifyLiquidity(poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, 10 ether, 0), bytes(""));
+        modifyLiquidityRouter.modifyLiquidity(
+            poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, 10 ether, 0), bytes("")
+        );
 
         // Deploy DAO token
         daoToken = new MockERC20("DAO Token", "DAO", 18);
 
         // Deploy the governance contract
-        governance = new TWAMMGovernance(manager, 10000, IERC20(address(daoToken)), currency0, currency1, 3000, 60, twamm);
+        governance =
+            new TWAMMGovernance(manager, 10000, IERC20(address(daoToken)), currency0, currency1, 3000, 60, twamm);
 
         // Deploy the quoter contract
         quoter = new TWAMMQuoter(address(manager), address(governance), twamm, poolKey);
@@ -90,7 +94,7 @@ contract TWAMMQuoterTest is Test, Deployers {
         daoToken.approve(address(governance), type(uint256).max);
     }
 
-    function testQuoterSetup() public {
+    function testQuoterSetup() public view {
         assertEq(address(quoter.poolManager()), address(manager), "Pool manager address mismatch");
         assertEq(address(quoter.governanceContract()), address(governance), "Governance contract address mismatch");
         assertEq(address(quoter.twamm()), twamm, "TWAMM address mismatch");
@@ -102,31 +106,33 @@ contract TWAMMQuoterTest is Test, Deployers {
     }
 
     function testQuoteProposal() public {
-    // Create a proposal
-    uint256 proposalAmount = 1 ether;
-    uint256 proposalDuration = TWAMM(twamm).expirationInterval();
-    vm.prank(alice);
-    governance.createProposal(proposalAmount, proposalDuration, true, "Test proposal");
-    uint256 proposalId = governance.proposalCount() - 1;
+        // Create a proposal
+        uint256 proposalAmount = 1 ether;
+        uint256 proposalDuration = TWAMM(twamm).expirationInterval();
+        vm.prank(alice);
+        governance.createProposal(proposalAmount, proposalDuration, true, "Test proposal");
+        uint256 proposalId = governance.proposalCount() - 1;
 
-    // Get quote for the proposal
-    (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) = quoter.getQuoteForProposal(proposalId);
+        // Get quote for the proposal
+        (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) = quoter.getQuoteForProposal(proposalId);
 
-    // Log the values for debugging
-    console.log("amount0Delta:", amount0Delta);
-    console.log("amount1Delta:", amount1Delta);
-    console.log("sqrtPriceX96After:", sqrtPriceX96After);
+        // Log the values for debugging
+        console.log("amount0Delta:", amount0Delta);
+        console.log("amount1Delta:", amount1Delta);
+        console.log("sqrtPriceX96After:", sqrtPriceX96After);
 
-    // Check that the quote is not zero and within reasonable bounds
-    assertTrue(amount0Delta != 0 || amount1Delta != 0, "Quote should not be zero");
-    assertTrue(sqrtPriceX96After != 0, "SqrtPriceX96After should not be zero");
-    assertTrue(amount0Delta > -1e27 && amount0Delta < 1e27, "amount0Delta out of reasonable bounds");
-    assertTrue(amount1Delta > -1e27 && amount1Delta < 1e27, "amount1Delta out of reasonable bounds");
-}
+        // Check that the quote is not zero and within reasonable bounds
+        assertTrue(amount0Delta != 0 || amount1Delta != 0, "Quote should not be zero");
+        assertTrue(sqrtPriceX96After != 0, "SqrtPriceX96After should not be zero");
+        assertTrue(amount0Delta > -1e27 && amount0Delta < 1e27, "amount0Delta out of reasonable bounds");
+        assertTrue(amount1Delta > -1e27 && amount1Delta < 1e27, "amount1Delta out of reasonable bounds");
+    }
 
     function testQuoteProposalWithNoLiquidity() public {
         // Remove all liquidity from the pool
-        modifyLiquidityRouter.modifyLiquidity(poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, -10 ether, 0), bytes(""));
+        modifyLiquidityRouter.modifyLiquidity(
+            poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, -10 ether, 0), bytes("")
+        );
 
         // Create a proposal
         uint256 proposalAmount = 1 ether;
@@ -141,36 +147,38 @@ contract TWAMMQuoterTest is Test, Deployers {
     }
 
     function testQuoteMultipleProposals() public {
-    // Create multiple proposals
-    uint256 proposalAmount = 1 ether;
-    uint256 proposalDuration = TWAMM(twamm).expirationInterval();
-    vm.startPrank(alice);
-    governance.createProposal(proposalAmount, proposalDuration, true, "Proposal 1");
-    governance.createProposal(proposalAmount, proposalDuration, false, "Proposal 2");
-    vm.stopPrank();
+        // Create multiple proposals
+        uint256 proposalAmount = 1 ether;
+        uint256 proposalDuration = TWAMM(twamm).expirationInterval();
+        vm.startPrank(alice);
+        governance.createProposal(proposalAmount, proposalDuration, true, "Proposal 1");
+        governance.createProposal(proposalAmount, proposalDuration, false, "Proposal 2");
+        vm.stopPrank();
 
-    uint256 proposalId1 = governance.proposalCount() - 2;
-    uint256 proposalId2 = governance.proposalCount() - 1;
+        uint256 proposalId1 = governance.proposalCount() - 2;
+        uint256 proposalId2 = governance.proposalCount() - 1;
 
-    // Get quotes for both proposals
-    (int256 amount0Delta1, int256 amount1Delta1, uint160 sqrtPriceX96After1) = quoter.getQuoteForProposal(proposalId1);
-    (int256 amount0Delta2, int256 amount1Delta2, uint160 sqrtPriceX96After2) = quoter.getQuoteForProposal(proposalId2);
+        // Get quotes for both proposals
+        (int256 amount0Delta1, int256 amount1Delta1, uint160 sqrtPriceX96After1) =
+            quoter.getQuoteForProposal(proposalId1);
+        (int256 amount0Delta2, int256 amount1Delta2, uint160 sqrtPriceX96After2) =
+            quoter.getQuoteForProposal(proposalId2);
 
-    // Log the values for debugging
-    console.log("Proposal 1 - amount0Delta:", amount0Delta1);
-    console.log("Proposal 1 - amount1Delta:", amount1Delta1);
-    console.log("Proposal 1 - sqrtPriceX96After:", sqrtPriceX96After1);
-    console.log("Proposal 2 - amount0Delta:", amount0Delta2);
-    console.log("Proposal 2 - amount1Delta:", amount1Delta2);
-    console.log("Proposal 2 - sqrtPriceX96After:", sqrtPriceX96After2);
+        // Log the values for debugging
+        console.log("Proposal 1 - amount0Delta:", amount0Delta1);
+        console.log("Proposal 1 - amount1Delta:", amount1Delta1);
+        console.log("Proposal 1 - sqrtPriceX96After:", sqrtPriceX96After1);
+        console.log("Proposal 2 - amount0Delta:", amount0Delta2);
+        console.log("Proposal 2 - amount1Delta:", amount1Delta2);
+        console.log("Proposal 2 - sqrtPriceX96After:", sqrtPriceX96After2);
 
-    // Check that the quotes are different and within reasonable bounds
-    assertTrue(amount0Delta1 != amount0Delta2 || amount1Delta1 != amount1Delta2, "Quotes should be different");
-    assertTrue(sqrtPriceX96After1 != sqrtPriceX96After2, "SqrtPriceX96After should be different");
-    assertTrue(amount0Delta1 > -1e27 && amount0Delta1 < 1e27, "amount0Delta1 out of reasonable bounds");
-    assertTrue(amount1Delta1 > -1e27 && amount1Delta1 < 1e27, "amount1Delta1 out of reasonable bounds");
-    assertTrue(amount0Delta2 > -1e27 && amount0Delta2 < 1e27, "amount0Delta2 out of reasonable bounds");
-    assertTrue(amount1Delta2 > -1e27 && amount1Delta2 < 1e27, "amount1Delta2 out of reasonable bounds");
+        // Check that the quotes are different and within reasonable bounds
+        assertTrue(amount0Delta1 != amount0Delta2 || amount1Delta1 != amount1Delta2, "Quotes should be different");
+        assertTrue(sqrtPriceX96After1 != sqrtPriceX96After2, "SqrtPriceX96After should be different");
+        assertTrue(amount0Delta1 > -1e27 && amount0Delta1 < 1e27, "amount0Delta1 out of reasonable bounds");
+        assertTrue(amount1Delta1 > -1e27 && amount1Delta1 < 1e27, "amount1Delta1 out of reasonable bounds");
+        assertTrue(amount0Delta2 > -1e27 && amount0Delta2 < 1e27, "amount0Delta2 out of reasonable bounds");
+        assertTrue(amount1Delta2 > -1e27 && amount1Delta2 < 1e27, "amount1Delta2 out of reasonable bounds");
     }
 
     function testQuoteNonExistentProposal() public {
