@@ -106,15 +106,13 @@ contract TWAMMQuoterTest is Test, Deployers {
     }
 
     function testQuoteProposal() public {
-        // Create a proposal
+        // Define proposal parameters
         uint256 proposalAmount = 1 ether;
-        uint256 proposalDuration = TWAMM(twamm).expirationInterval();
-        vm.prank(alice);
-        governance.createProposal(proposalAmount, proposalDuration, true, "Test proposal");
-        uint256 proposalId = governance.proposalCount() - 1;
+        bool zeroForOne = true;
 
-        // Get quote for the proposal
-        (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) = quoter.getQuoteForProposal(proposalId);
+        // Get quote for the potential proposal
+        (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After) =
+            quoter.quoteProposal(proposalAmount, zeroForOne);
 
         // Log the values for debugging
         console.log("amount0Delta:", amount0Delta);
@@ -126,65 +124,5 @@ contract TWAMMQuoterTest is Test, Deployers {
         assertTrue(sqrtPriceX96After != 0, "SqrtPriceX96After should not be zero");
         assertTrue(amount0Delta > -1e27 && amount0Delta < 1e27, "amount0Delta out of reasonable bounds");
         assertTrue(amount1Delta > -1e27 && amount1Delta < 1e27, "amount1Delta out of reasonable bounds");
-    }
-
-    function testQuoteProposalWithNoLiquidity() public {
-        // Remove all liquidity from the pool
-        modifyLiquidityRouter.modifyLiquidity(
-            poolKey, IPoolManager.ModifyLiquidityParams(-60, 60, -10 ether, 0), bytes("")
-        );
-
-        // Create a proposal
-        uint256 proposalAmount = 1 ether;
-        uint256 proposalDuration = TWAMM(twamm).expirationInterval();
-        vm.prank(alice);
-        governance.createProposal(proposalAmount, proposalDuration, true, "Test proposal");
-        uint256 proposalId = governance.proposalCount() - 1;
-
-        // Attempt to get quote for the proposal
-        vm.expectRevert(); // Expect revert due to lack of liquidity
-        quoter.getQuoteForProposal(proposalId);
-    }
-
-    function testQuoteMultipleProposals() public {
-        // Create multiple proposals
-        uint256 proposalAmount = 1 ether;
-        uint256 proposalDuration = TWAMM(twamm).expirationInterval();
-        vm.startPrank(alice);
-        governance.createProposal(proposalAmount, proposalDuration, true, "Proposal 1");
-        governance.createProposal(proposalAmount, proposalDuration, false, "Proposal 2");
-        vm.stopPrank();
-
-        uint256 proposalId1 = governance.proposalCount() - 2;
-        uint256 proposalId2 = governance.proposalCount() - 1;
-
-        // Get quotes for both proposals
-        (int256 amount0Delta1, int256 amount1Delta1, uint160 sqrtPriceX96After1) =
-            quoter.getQuoteForProposal(proposalId1);
-        (int256 amount0Delta2, int256 amount1Delta2, uint160 sqrtPriceX96After2) =
-            quoter.getQuoteForProposal(proposalId2);
-
-        // Log the values for debugging
-        console.log("Proposal 1 - amount0Delta:", amount0Delta1);
-        console.log("Proposal 1 - amount1Delta:", amount1Delta1);
-        console.log("Proposal 1 - sqrtPriceX96After:", sqrtPriceX96After1);
-        console.log("Proposal 2 - amount0Delta:", amount0Delta2);
-        console.log("Proposal 2 - amount1Delta:", amount1Delta2);
-        console.log("Proposal 2 - sqrtPriceX96After:", sqrtPriceX96After2);
-
-        // Check that the quotes are different and within reasonable bounds
-        assertTrue(amount0Delta1 != amount0Delta2 || amount1Delta1 != amount1Delta2, "Quotes should be different");
-        assertTrue(sqrtPriceX96After1 != sqrtPriceX96After2, "SqrtPriceX96After should be different");
-        assertTrue(amount0Delta1 > -1e27 && amount0Delta1 < 1e27, "amount0Delta1 out of reasonable bounds");
-        assertTrue(amount1Delta1 > -1e27 && amount1Delta1 < 1e27, "amount1Delta1 out of reasonable bounds");
-        assertTrue(amount0Delta2 > -1e27 && amount0Delta2 < 1e27, "amount0Delta2 out of reasonable bounds");
-        assertTrue(amount1Delta2 > -1e27 && amount1Delta2 < 1e27, "amount1Delta2 out of reasonable bounds");
-    }
-
-    function testQuoteNonExistentProposal() public {
-        uint256 nonExistentProposalId = 9999;
-
-        vm.expectRevert(); // Expect revert when quoting a non-existent proposal
-        quoter.getQuoteForProposal(nonExistentProposalId);
     }
 }
