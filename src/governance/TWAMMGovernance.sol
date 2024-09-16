@@ -23,13 +23,12 @@ contract TWAMMGovernance {
     uint256 public immutable twammExpirationInterval;
 
     // Declare immutable variables
-    Currency public immutable token0;
+    Currency public immutable token0; 
     Currency public immutable token1;
     uint24 public immutable fee;
     int24 public immutable tickSpacing;
     IPoolManager public immutable manager;
     uint256 public immutable expirationInterval;
-    //TWAMM public immutable twamm;
     address public immutable twamm;
     
 
@@ -71,7 +70,7 @@ contract TWAMMGovernance {
         Currency _token1,
         uint24 _fee,
         int24 _tickSpacing,
-        address _twamm // Accept twamm as address
+        address _twamm 
     ) {
         manager = _manager;
         expirationInterval = _expirationInterval;
@@ -89,7 +88,7 @@ contract TWAMMGovernance {
         uint256 amount,
         uint256 duration,
         bool zeroForOne,
-        string memory proposalDescription // New parameter
+        string memory proposalDescription
     ) external {
         uint256 totalSupply = daoToken.totalSupply();
         uint256 proposerBalance = daoToken.balanceOf(msg.sender);
@@ -162,32 +161,14 @@ contract TWAMMGovernance {
         // Ensure it's on the correct interval
         expiration = expiration - (expiration % twammExpirationInterval);
 
-
         proposal.executed = true;
         
-
-        // Create the PoolKey
-        // PoolKey memory key =
-        //     PoolKey({currency0: token0, currency1: token1, fee: fee, tickSpacing: tickSpacing, hooks: IHooks(twamm)});
-
-        // // Create the OrderKey
-        // ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey({
-        //     owner: address(this),
-        //     expiration: uint160(expiration),
-        //     zeroForOne: proposal.zeroForOne
-        // });
-
         // Approve TWAMM to spend tokens
         IERC20(proposal.zeroForOne ? Currency.unwrap(token0) : Currency.unwrap(token1)).approve(
             address(twamm), proposal.amount
         );
 
-        // Call submitOrder on TWAMM
-        //bytes32 orderId = ITWAMM(twamm).submitOrder(key, orderKey, proposal.amount);
-
         emit ProposalExecuted(proposalId);
-        // You might want to emit the orderId as well
-        // emit OrderSubmitted(proposalId, orderId);
     }
 
     function withdrawTokens(uint256 proposalId) external {
