@@ -1,8 +1,8 @@
 # DGL: Dynamic Governance Liquidator
 
 ### Authers
-- Raphael Nembhard: Github - DeluxeRaph
-- Benjamin Scheinberg: Github - theSchein
+- Raphael Nembhard: Github - DeluxeRaph // Telegram - @VillageFarmerr
+- Benjamin Scheinberg: Github - theSchein // Telegram - @schein_berg
 
 ## Introduction
 
