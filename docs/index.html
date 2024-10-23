@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DGL: Dynamic Governance Liquidator</title>
+    <style>
+        :root {
+            --primary-color: #76ffee;
+            --secondary-color: #ff76e3;
+            --text-color: #000000;
+            --background-start: black;
+            --background-end: #76ffee;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, var(--background-start), var(--background-end));
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 1.5rem;
+            text-align: center;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: var(--text-color);
+            font-size: 2.5em;
+            margin-bottom: 0.5em;
+        }
+        h2 {
+            font-size: 2em;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+        }
+        h3 {
+            font-size: 1.5em;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        p, ul {
+            font-size: 1.1em;
+            margin-bottom: 1em;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+            padding: 10px 15px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            font-size: 1.2em;
+            margin: 5px;
+        }
+        .cta-button:hover {
+            background-color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+        .project-image {
+            max-width: 100%;
+            height: auto;
+            margin: 20px 0;
+            border-radius: 5px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+        .logo {
+            max-width: 150px;
+            height: auto;
+            margin-bottom: 1em;
+        }
+        main {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .authors ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        .authors li {
+            margin-bottom: 15px;
+        }
+        .center-align {
+            text-align: center;
+            margin: auto 0;
+        }
+        .button-container {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <img src="images/dgl.png" alt="DGL Logo" class="logo">
+        <h1>DGL: Dynamic Governance Liquidator</h1>
+
+        <div class="center-align">
+            <a href="https://explorer.gitcoin.co/#/round/42161/611/6" class="cta-button">Donate on Gitcoin!</a>
+        </div>
+
+        <div class="button-container">
+            <a href="https://projects.atrium.academy/Dynamic-Governance-Liquidator-1045f0444abe816e9477eab457cb909e" target="_blank" class="cta-button">Atrium Project Submission</a>
+            <a href="https://github.com/DeluxeRaph/DGL-Dynamic-Governance-Liquidator" target="_blank" class="cta-button">GitHub Repo</a>
+        </div>
+    </header>
+    <main>
+        <h2>Welcome to DGL</h2>
+        <p>DGL (Dynamic Governance Liquidator) is an open-source TWAMM Uniswap v4 hook with governance features, designed to revolutionize how DAOs manage their governance tokens.</p>
+        
+        <h3>Project Summary</h3>
+        <p>DGL is a comprehensive solution tailored for DAOs to manage their governance tokens more effectively and transparently. Built atop the Uniswap v4 protocol, DGL integrates the Time-Weighted Average Market Maker (TWAMM), allowing DAOs to dynamically buy or sell governance tokens over extended periods to minimize market impact and mitigate frontrunning risks.</p>
+        
+        <h3>Key Features</h3>
+        <ul>
+            <li>TWAMM Integration for efficient token swaps</li>
+            <li>Governance-driven liquidation process</li>
+            <li>Free and Open source</li>
+        </ul>
+
+        <h3>Next Milestones</h3>
+        <p>We want to improve our current code:</p>
+        <ul>
+            <li>Develop our TWAMM from scratch</li>
+            <li>Test develop a quoter for TWAMM changes</li>
+            <li>Create a frontend to use the DGL on testnet</li>
+        </ul>
+
+        <div class="authors">
+            <h3>Authors</h3>
+            <ul>
+                <li>
+                    Raphael Nembhard:
+                    <a href="https://github.com/DeluxeRaph" target="_blank">GitHub</a> |
+                    <a href="https://twitter.com/VillageFarmerr" target="_blank">Twitter</a>
+                </li>
+                <li>
+                    Benjamin Scheinberg:
+                    <a href="https://github.com/theSchein" target="_blank">GitHub</a> |
+                    <a href="https://twitter.com/schein_berg" target="_blank">Twitter</a>
+                </li>
+            </ul>
+        </div>
+
+
+    </main>
+</body>
+</html>

@@ -1,4 +1,4 @@
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -51,8 +51,10 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
     TWAMM twamm =
         TWAMM(address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG)));
     address hookAddress;
+    address daoAddress;
     MockERC20 token0;
     MockERC20 token1;
+    MockERC20 daoToken;
     PoolKey poolKey;
     PoolId poolId;
 
@@ -103,39 +105,7 @@ contract TWAMMTest is Test, Deployers, GasSnapshot {
         assertEq(twamm.lastVirtualOrderTimestamp(initId), 10000);
     }
 
-    // @note need to figure out what snapStart is.
-    // When it is comment out it is panicing for an arithmetic underflow or overflow.
-    // function testTWAMM_submitOrder_StoresOrderWithCorrectPoolAndOrderPoolInfo() public {
-    //     uint160 expiration = 30000;
-    //     uint160 submitTimestamp = 10000;
-    //     uint160 duration = expiration - submitTimestamp;
-
-    //     ITWAMM.OrderKey memory orderKey = ITWAMM.OrderKey(address(this), expiration, true);
-
-    //     ITWAMM.Order memory nullOrder = twamm.getOrder(poolKey, orderKey);
-    //     assertEq(nullOrder.sellRate, 0);
-    //     assertEq(nullOrder.earningsFactorLast, 0);
-
-    //     vm.warp(10000);
-    //     token0.approve(address(twamm), 100 ether);
-    //     // @note snapStart("TWAMMSubmitOrder");
-    //     twamm.submitOrder(poolKey, orderKey, 1 ether);
-    //     snapEnd();
-
-    //     ITWAMM.Order memory submittedOrder = twamm.getOrder(poolKey, orderKey);
-    //     (uint256 sellRateCurrent0For1, uint256 earningsFactorCurrent0For1) = twamm.getOrderPool(poolKey, true);
-    //     (uint256 sellRateCurrent1For0, uint256 earningsFactorCurrent1For0) = twamm.getOrderPool(poolKey, false);
-
-    //     assertEq(submittedOrder.sellRate, 1 ether / duration);
-    //     assertEq(submittedOrder.earningsFactorLast, 0);
-    //     assertEq(sellRateCurrent0For1, 1 ether / duration);
-    //     assertEq(sellRateCurrent1For0, 0);
-    //     assertEq(earningsFactorCurrent0For1, 0);
-    //     assertEq(earningsFactorCurrent1For0, 0);
-    // }
-
     function TWAMMSingleSell0For1SellRateAndEarningsFactorGetsUpdatedProperly() public {
-        // TODO: fails with a bug for single pool sell, swap amount 3 wei above balance.
 
         ITWAMM.OrderKey memory orderKey1 = ITWAMM.OrderKey(address(this), 30000, true);
         ITWAMM.OrderKey memory orderKey2 = ITWAMM.OrderKey(address(this), 40000, true);

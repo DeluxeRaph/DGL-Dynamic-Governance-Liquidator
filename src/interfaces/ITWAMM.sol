@@ -133,4 +133,17 @@ interface ITWAMM {
     function executeTWAMMOrders(PoolKey memory key) external;
 
     function tokensOwed(Currency token, address owner) external returns (uint256);
+
+    /// @notice Simulates a swap without executing it, used for quoting
+    /// @param key The PoolKey for which to identify the amm pool
+    /// @param amountSpecified The amount of tokens to swap
+    /// @param zeroForOne The direction of the swap (true for 0 -> 1, false for 1 -> 0)
+    /// @param sqrtPriceLimitX96 The price limit of the swap
+    /// @return amount0Delta The delta of token0
+    /// @return amount1Delta The delta of token1
+    /// @return sqrtPriceX96After The sqrt price after the swap
+    function quoteSwap(PoolKey calldata key, int256 amountSpecified, bool zeroForOne, uint160 sqrtPriceLimitX96)
+        external
+        view
+        returns (int256 amount0Delta, int256 amount1Delta, uint160 sqrtPriceX96After);
 }
